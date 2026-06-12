@@ -62,27 +62,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     // Simple validation
+    $is_atm_building = stripos($building['name'], 'ATM') !== false;
+    
     if (!$building_id || !$booker_name) {
         $error = "Mohon lengkapi semua field yang wajib.";
     }
-    if (!$error && $is_multi_day) {
-        if (!$date_from || !$date_to) {
-            $error = "Mohon isi tanggal mulai dan tanggal selesai untuk booking beberapa hari.";
-        } elseif (strtotime($date_from) === false || strtotime($date_to) === false) {
-            $error = "Format tanggal tidak valid.";
-        } elseif (strtotime($date_from) > strtotime($date_to)) {
-            $error = "Tanggal selesai tidak boleh lebih awal dari tanggal mulai.";
+    
+    if ($is_atm_building) {
+        // For ATM buildings, only need year
+        $booking_year = $_POST['booking_year'] ?? null;
+        if (!$booking_year) {
+            $error = "Mohon pilih tahun sewa.";
         }
-    }
-    if (!$error && !$is_multi_day) {
-        if (!$booking_date || !$start_time || !$end_time) {
-            $error = "Untuk booking 1 hari, mohon isi tanggal, jam mulai, dan jam selesai.";
-        } elseif (strtotime($end_time) <= strtotime($start_time)) {
-            $error = "Jam selesai harus lebih besar dari jam mulai.";
+        // Set date to January 1st of selected year, time to 00:00 - 23:59
+        $booking_date = $booking_year . '-01-01';
+        $start_time = '00:00:00';
+        $end_time = '23:59:59';
+        $is_multi_day = false;
+    } else {
+        if (!$error && $is_multi_day) {
+            if (!$date_from || !$date_to) {
+                $error = "Mohon isi tanggal mulai dan tanggal selesai untuk booking beberapa hari.";
+            } elseif (strtotime($date_from) === false || strtotime($date_to) === false) {
+                $error = "Format tanggal tidak valid.";
+            } elseif (strtotime($date_from) > strtotime($date_to)) {
+                $error = "Tanggal selesai tidak boleh lebih awal dari tanggal mulai.";
+            }
+        }
+        if (!$error && !$is_multi_day) {
+            if (!$booking_date || !$start_time || !$end_time) {
+                $error = "Untuk booking 1 hari, mohon isi tanggal, jam mulai, dan jam selesai.";
+            } elseif (strtotime($end_time) <= strtotime($start_time)) {
+                $error = "Jam selesai harus lebih besar dari jam mulai.";
+            }
         }
     }
 
-    // Restriction: Maximum H-3 (Booking must be at least 3 days before the event)
+    // Restriction: Maximum H-3 (Booking must be at least 3 days before the event) - DISABLED
+    /*
     if (!$error) {
         $today = new DateTime();
         $today->setTime(0, 0, 0);
@@ -100,6 +117,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
     }
+    */
 
     if (!$error) {
         // Check availability & create bookings
@@ -166,9 +184,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
 
-            // Process and save add-on items (Skip for Ruang Rapat Setda and Free buildings)
+            // Process and save add-on items (Skip for Ruang Rapat Setda, Free buildings, and ATM buildings)
             $total_item_price = 0;
-            if (trim($building['name']) !== 'Ruang Rapat Sekretariat Daerah Kab. Hulu Sungai Tengah' && $building['category'] !== 'gratis') {
+            if (trim($building['name']) !== 'Ruang Rapat Sekretariat Daerah Kab. Hulu Sungai Tengah' && $building['category'] !== 'gratis' && !$is_atm_building) {
                 $ordered_items = $_POST['items'] ?? [];
                 foreach ($available_items as $item) {
                     if (isset($ordered_items[$item['id']]) && $ordered_items[$item['id']] > 0) {
@@ -185,7 +203,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Calculate final invoice amount
             $number_of_days = count($dates);
             $building_price_per_day = ($building['category'] === 'berbayar' ? $building['price'] : 0);
-            $total_building_cost = $building_price_per_day * $number_of_days;
+            
+            if ($is_atm_building) {
+                // For ATM buildings, price is per year (already stored as price per month in DB, multiply by 12)
+                $total_building_cost = $building_price_per_day * 12;
+            } else {
+                $total_building_cost = $building_price_per_day * $number_of_days;
+            }
+            
             $final_amount = $total_building_cost + $total_item_price;
 
             if ($final_amount > 0) {
@@ -377,9 +402,8 @@ include 'header.php';
                         flatpickrConfig.minTime = "07:00";
                         flatpickrConfig.maxTime = "17:00";
                         
-                        // Disable Thursdays for Siang Hari
+                        // Allow all dates
                         flatpickr(".form-control[type='date']", {
-                            minDate: "<?= date('Y-m-d', strtotime('+3 days')) ?>",
                             disable: [
                                 function(date) {
                                     return (date.getDay() === 4); // 4 = Thursday
@@ -496,6 +520,10 @@ include 'header.php';
                                         <div class="form-text xsmall mt-1"><i>Upload surat resmi permohonan peminjaman gedung.</i></div>
                                     </div>
                                     
+                                    <?php 
+                                    $is_atm = stripos($building['name'], 'ATM') !== false;
+                                    if (!$is_atm): 
+                                    ?>
                                     <div class="col-12 mt-4">
                                         <div class="form-check mb-3">
                                             <input type="checkbox" id="is_multi_day" name="is_multi_day" value="1" class="form-check-input">
@@ -508,7 +536,7 @@ include 'header.php';
                                         <div id="single-day-fields" class="row g-3">
                                             <div class="col-md-4">
                                                 <label class="form-label small fw-medium">Tanggal</label>
-                                                <input type="date" name="booking_date" class="form-control" min="<?= date('Y-m-d', strtotime('+3 days')) ?>">
+                                                <input type="date" name="booking_date" class="form-control">
                                             </div>
                                             <div class="col-md-4">
                                                 <label class="form-label small fw-medium">Jam Mulai</label>
@@ -529,19 +557,35 @@ include 'header.php';
                                         <div id="multi-day-fields" class="row g-3 d-none">
                                             <div class="col-md-4">
                                                 <label class="form-label small fw-bold text-secondary">Tanggal Mulai</label>
-                                                <input type="date" name="date_from" class="form-control" min="<?= date('Y-m-d', strtotime('+3 days')) ?>">
+                                                <input type="date" name="date_from" class="form-control">
                                             </div>
                                             <div class="col-md-4">
                                                 <label class="form-label small fw-bold text-secondary">Tanggal Selesai</label>
-                                                <input type="date" name="date_to" class="form-control" min="<?= date('Y-m-d', strtotime('+3 days')) ?>">
+                                                <input type="date" name="date_to" class="form-control">
                                             </div>
                                         </div>
                                         <div class="form-text xsmall mt-1"><i>Catatan: Booking lebih dari 1 (satu) hari tidak membutuhkan jam. Untuk satu hari, jam wajib diisi.</i></div>
                                     </div>
+                                    <?php else: ?>
+                                    <div class="col-12 mt-4">
+                                        <div class="mb-4">
+                                            <label class="form-label small fw-bold text-secondary">Tahun Sewa</label>
+                                            <select name="booking_year" class="form-select bg-light border-0 py-2 shadow-none" required>
+                                                <?php 
+                                                $current_year = date('Y');
+                                                for ($y = $current_year; $y <= $current_year + 5; $y++): 
+                                                ?>
+                                                <option value="<?= $y ?>"><?= $y ?></option>
+                                                <?php endfor; ?>
+                                            </select>
+                                            <div class="form-text xsmall mt-1"><i>Pilih tahun sewa Ruang ATM (harga per tahun).</i></div>
+                                        </div>
+                                    </div>
+                                    <?php endif; ?>
                                 </div>
                             </div>
 
-                            <?php if (trim($building['name']) !== 'Ruang Rapat Sekretariat Daerah Kab. Hulu Sungai Tengah' && $building['category'] !== 'gratis'): ?>
+                            <?php if (trim($building['name']) !== 'Ruang Rapat Sekretariat Daerah Kab. Hulu Sungai Tengah' && $building['category'] !== 'gratis' && !$is_atm): ?>
                             <div class="mb-4">
                                 <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">Tambah Fasilitas Pendukung</h6>
                                 <div class="list-group">

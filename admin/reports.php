@@ -93,17 +93,30 @@ include 'header.php';
 <!-- Preview Table -->
 <?php
 // Statistics for charts
+// First get all buildings
+$buildings_query = "SELECT id, name, category FROM buildings ORDER BY name";
+$stmt_buildings = $pdo->query($buildings_query);
+$all_buildings = $stmt_buildings->fetchAll(PDO::FETCH_ASSOC);
+
+// Initialize building usage with 0 for all buildings
+$building_usage = [];
+foreach ($all_buildings as $building) {
+    $building_usage[$building['name']] = 0;
+}
+
+// Now get all approved bookings with building and invoice info
 $stats_query = "
     SELECT 
+        b.id as booking_id,
         g.name as building_name,
         g.category,
-        COUNT(b.id) as usage_count
-    FROM buildings g
-    LEFT JOIN bookings b ON g.id = b.building_id 
-        AND YEAR(b.booking_date) = ?
+        i.id as invoice_id
+    FROM bookings b
+    JOIN buildings g ON b.building_id = g.id
+    LEFT JOIN invoices i ON b.id = i.booking_id
+    WHERE YEAR(b.booking_date) = ?
         " . ($month ? "AND MONTH(b.booking_date) = ?" : "") . "
         AND b.status = 'approved'
-    GROUP BY g.id, g.name, g.category
 ";
 $stats_params = [$year];
 if ($month) $stats_params[] = $month;
@@ -112,15 +125,31 @@ $stmt_stats = $pdo->prepare($stats_query);
 $stmt_stats->execute($stats_params);
 $stats_data = $stmt_stats->fetchAll(PDO::FETCH_ASSOC);
 
-$building_labels = [];
-$building_counts = [];
 $category_stats = ['gratis' => 0, 'berbayar' => 0];
 
+// Process each booking
 foreach ($stats_data as $row) {
-    $building_labels[] = $row['building_name'];
-    $building_counts[] = (int)$row['usage_count'];
-    $category_stats[$row['category']] += (int)$row['usage_count'];
+    // Count building usage
+    if (isset($building_usage[$row['building_name']])) {
+        $building_usage[$row['building_name']]++;
+    }
+    
+    // Determine category for donut chart
+    if ($row['category'] == 'gratis') {
+        $category_stats['gratis']++;
+    } else {
+        // If building is berbayar but no invoice, count as gratis
+        if (empty($row['invoice_id'])) {
+            $category_stats['gratis']++;
+        } else {
+            $category_stats['berbayar']++;
+        }
+    }
 }
+
+// Prepare building chart data
+$building_labels = array_keys($building_usage);
+$building_counts = array_values($building_usage);
 
 $query = "
     SELECT b.*, g.name as building_name 
@@ -256,12 +285,15 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Category Usage Chart
     const ctxCategory = document.getElementById('categoryChart').getContext('2d');
+    const categoryData = [<?= $category_stats['gratis'] ?>, <?= $category_stats['berbayar'] ?>];
+    const totalUsage = categoryData.reduce((a, b) => a + b, 0);
+    
     new Chart(ctxCategory, {
         type: 'doughnut',
         data: {
             labels: ['Gratis', 'Berbayar'],
             datasets: [{
-                data: [<?= $category_stats['gratis'] ?>, <?= $category_stats['berbayar'] ?>],
+                data: categoryData,
                 backgroundColor: ['#10b981', '#f59e0b'],
                 borderWidth: 0
             }]
@@ -292,7 +324,29 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             },
             cutout: '70%'
-        }
+        },
+        plugins: [{
+            id: 'centerText',
+            beforeDraw: function(chart) {
+                const width = chart.width;
+                const height = chart.height;
+                const ctx = chart.ctx;
+                
+                ctx.restore();
+                
+                const fontSize = (height / 114).toFixed(2);
+                ctx.textBaseline = "middle";
+                ctx.fillStyle = '#3b82f6';
+                
+                const text = totalUsage;
+                const textX = Math.round((width - ctx.measureText(text).width) / 2);
+                
+                ctx.font = (fontSize * 1.5) + "em sans-serif";
+                ctx.fillText(text, textX, height / 2);
+                
+                ctx.save();
+            }
+        }]
     });
 });
 </script>

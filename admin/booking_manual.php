@@ -21,18 +21,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $booker_phone = $_POST['booker_phone'];
     $organization = $_POST['organization'];
     $event_name = $_POST['event_name'];
-    $is_multi_day = isset($_POST['is_multi_day']) && $_POST['is_multi_day'] === '1';
-    $booking_date = $_POST['booking_date'] ?? null;
-    $date_from = $_POST['date_from'] ?? null;
-    $date_to = $_POST['date_to'] ?? null;
-    $start_time = $_POST['start_time'] ?? null;
-    $end_time = $_POST['end_time'] ?? null;
-    $admin_notes = $_POST['admin_notes'];
-    $proposal_file = null;
 
     // Handle file upload
+    $proposal_file = null;
     if (isset($_FILES['proposal_file']) && $_FILES['proposal_file']['error'] === UPLOAD_ERR_OK) {
-        $uploadDir = 'uploads/proposals/';
+        $uploadDir = '../uploads/proposals/';
         if (!is_dir($uploadDir)) {
             mkdir($uploadDir, 0777, true);
         }
@@ -51,71 +44,79 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+    // Fetch building info
+    $bStmt = $pdo->prepare("SELECT * FROM buildings WHERE id = ?");
+    $bStmt->execute([$building_id]);
+    $building = $bStmt->fetch(PDO::FETCH_ASSOC);
+    $is_atm_building = stripos($building['name'], 'ATM') !== false;
+
     // Basic validation
     if (!$building_id || !$booker_name || !$event_name) {
         $error = "Mohon lengkapi semua field yang wajib.";
-    }
-    
-    if (!$error && $is_multi_day) {
-        if (!$date_from || !$date_to) {
-            $error = "Mohon isi tanggal mulai dan tanggal selesai untuk booking beberapa hari.";
-        } elseif (strtotime($date_from) > strtotime($date_to)) {
-            $error = "Tanggal selesai tidak boleh lebih awal dari tanggal mulai.";
+    } elseif ($is_atm_building) {
+        $booking_year = $_POST['booking_year'] ?? null;
+        if (!$booking_year) {
+            $error = "Mohon pilih tahun sewa.";
         }
-    }
-    
-    if (!$error && !$is_multi_day) {
-        if (!$booking_date || !$start_time || !$end_time) {
-            $error = "Mohon isi tanggal, jam mulai, dan jam selesai.";
-        } elseif (strtotime($end_time) <= strtotime($start_time)) {
-            $error = "Jam selesai harus lebih besar dari jam mulai.";
-        }
-    }
-
-    // Restriction: Minimum H-3 (Booking must be at least 3 days before the event)
-    if (!$error) {
-        $today = new DateTime();
-        $today->setTime(0, 0, 0);
-        $min_booking_date = (clone $today)->modify('+3 days');
-
+    } else {
+        $is_multi_day = isset($_POST['is_multi_day']) && $_POST['is_multi_day'] === '1';
+        $booking_date = $_POST['booking_date'] ?? null;
+        $date_from = $_POST['date_from'] ?? null;
+        $date_to = $_POST['date_to'] ?? null;
+        $start_time = $_POST['start_time'] ?? null;
+        $end_time = $_POST['end_time'] ?? null;
+        
         if ($is_multi_day) {
-            $booking_start = new DateTime($date_from);
-            if ($booking_start < $min_booking_date) {
-                $error = "Booking minimal dilakukan H-3 sebelum acara. Tanggal tercepat yang diperbolehkan adalah " . $min_booking_date->format('d M Y') . ".";
+            if (!$date_from || !$date_to) {
+                $error = "Mohon isi tanggal mulai dan tanggal selesai untuk booking beberapa hari.";
+            } elseif (strtotime($date_from) > strtotime($date_to)) {
+                $error = "Tanggal selesai tidak boleh lebih awal dari tanggal mulai.";
             }
         } else {
-            $booking_start = new DateTime($booking_date);
-            if ($booking_start < $min_booking_date) {
-                $error = "Booking minimal dilakukan H-3 sebelum acara. Tanggal tercepat yang diperbolehkan adalah " . $min_booking_date->format('d M Y') . ".";
+            if (!$booking_date || !$start_time || !$end_time) {
+                $error = "Mohon isi tanggal, jam mulai, dan jam selesai.";
+            } elseif (strtotime($end_time) <= strtotime($start_time)) {
+                $error = "Jam selesai harus lebih besar dari jam mulai.";
             }
         }
     }
+    
+    $admin_notes = $_POST['admin_notes'];
 
     if (!$error) {
         try {
             $pdo->beginTransaction();
 
-            // Fetch building info for restriction check
+            // Fetch building info
             $bStmt = $pdo->prepare("SELECT * FROM buildings WHERE id = ?");
             $bStmt->execute([$building_id]);
             $building = $bStmt->fetch(PDO::FETCH_ASSOC);
+            $is_atm_building = stripos($building['name'], 'ATM') !== false;
 
             $dates = [];
-            if ($is_multi_day) {
-                $period = new DatePeriod(
-                    new DateTime($date_from),
-                    new DateInterval('P1D'),
-                    (new DateTime($date_to))->modify('+1 day')
-                );
-                foreach ($period as $dt) {
-                    $dates[] = $dt->format('Y-m-d');
-                }
+            if ($is_atm_building) {
+                $booking_year = $_POST['booking_year'];
+                $dates[] = $booking_year . '-01-01';
                 $start_time_use = '00:00:00';
                 $end_time_use = '23:59:59';
             } else {
-                $dates[] = $booking_date;
-                $start_time_use = $start_time;
-                $end_time_use = $end_time;
+                $is_multi_day = isset($_POST['is_multi_day']) && $_POST['is_multi_day'] === '1';
+                if ($is_multi_day) {
+                    $period = new DatePeriod(
+                        new DateTime($_POST['date_from']),
+                        new DateInterval('P1D'),
+                        (new DateTime($_POST['date_to']))->modify('+1 day')
+                    );
+                    foreach ($period as $dt) {
+                        $dates[] = $dt->format('Y-m-d');
+                    }
+                    $start_time_use = '00:00:00';
+                    $end_time_use = '23:59:59';
+                } else {
+                    $dates[] = $_POST['booking_date'];
+                    $start_time_use = $_POST['start_time'];
+                    $end_time_use = $_POST['end_time'];
+                }
             }
 
             // Restriction for "Gedung Balai Rakyat (Siang Hari)" on Thursdays (Acara Rutin)
@@ -128,52 +129,72 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             // Time restrictions based on building name
-            if (stripos($building['name'], 'Balai Rakyat') !== false && stripos($building['name'], 'Siang Hari') !== false) {
-                if ($start_time_use < '07:00:00' || $end_time_use > '17:00:00') {
-                    throw new Exception("Jam booking untuk Gedung Balai Rakyat (Siang Hari) hanya tersedia dari pukul 07:00 WITA s.d 17:00 WITA.");
-                }
-            } elseif (stripos($building['name'], 'Balai Rakyat') !== false && stripos($building['name'], 'Malam Hari') !== false) {
-                if (!($start_time_use >= '18:00:00' || $end_time_use <= '06:00:00')) {
-                    throw new Exception("Jam booking untuk Gedung Balai Rakyat (Malam Hari) hanya tersedia dari pukul 18:00 WITA s.d 06:00 WITA.");
+            if (!$is_atm_building) {
+                if (stripos($building['name'], 'Balai Rakyat') !== false && stripos($building['name'], 'Siang Hari') !== false) {
+                    if ($start_time_use < '07:00:00' || $end_time_use > '17:00:00') {
+                        throw new Exception("Jam booking untuk Gedung Balai Rakyat (Siang Hari) hanya tersedia dari pukul 07:00 WITA s.d 17:00 WITA.");
+                    }
+                } elseif (stripos($building['name'], 'Balai Rakyat') !== false && stripos($building['name'], 'Malam Hari') !== false) {
+                    if (!($start_time_use >= '18:00:00' || $end_time_use <= '06:00:00')) {
+                        throw new Exception("Jam booking untuk Gedung Balai Rakyat (Malam Hari) hanya tersedia dari pukul 18:00 WITA s.d 06:00 WITA.");
+                    }
                 }
             }
 
             // Check availability for each date
-            foreach ($dates as $date) {
-                $checkStmt = $pdo->prepare("SELECT COUNT(*) FROM bookings 
-                    WHERE building_id = ? 
-                    AND booking_date = ? 
-                    AND status = 'approved'
-                    AND ((start_time <= ? AND end_time >= ?) OR (start_time <= ? AND end_time >= ?))");
-                $checkStmt->execute([$building_id, $date, $start_time_use, $start_time_use, $end_time_use, $end_time_use]);
-                $count = $checkStmt->fetchColumn();
+            if (!$is_atm_building) {
+                foreach ($dates as $date) {
+                    $checkStmt = $pdo->prepare("SELECT COUNT(*) FROM bookings 
+                        WHERE building_id = ? 
+                        AND booking_date = ? 
+                        AND status = 'approved'
+                        AND ((start_time <= ? AND end_time >= ?) OR (start_time <= ? AND end_time >= ?))");
+                    $checkStmt->execute([$building_id, $date, $start_time_use, $start_time_use, $end_time_use, $end_time_use]);
+                    $count = $checkStmt->fetchColumn();
 
-                if ($count >= $building['quantity']) {
-                    throw new Exception("Jadwal atau unit untuk gedung ini sudah penuh pada tanggal " . date('d M Y', strtotime($date)) . ".");
+                    if ($count >= $building['quantity']) {
+                        throw new Exception("Jadwal atau unit untuk gedung ini sudah penuh pada tanggal " . date('d M Y', strtotime($date)) . ".");
+                    }
                 }
             }
 
-            // =========================================================================
-            // PERBAIKAN DI SINI: Menambahkan kolom proposal_file ke dalam query INSERT
-            // =========================================================================
-            foreach ($dates as $date) {
-                $insertStmt = $pdo->prepare("INSERT INTO bookings 
-                    (building_id, booker_name, booker_phone, organization, event_name, booking_date, start_time, end_time, status, admin_notes, proposal_file) 
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'approved', ?, ?)");
+            // Insert manual bookings (directly approved)
+            $primary_booking_id = null;
+            foreach ($dates as $idx => $date) {
+                $insertStmt = $pdo->prepare("INSERT INTO bookings (building_id, booker_name, booker_phone, organization, event_name, booking_date, start_time, end_time, status, admin_notes, proposal_file) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'approved', ?, ?)");
+                $insertStmt->execute([$building_id, $booker_name, $booker_phone, $organization, $event_name, $date, $start_time_use, $end_time_use, $admin_notes, $proposal_file]);
+                if ($idx === 0) {
+                    $primary_booking_id = $pdo->lastInsertId();
+                }
+            }
+
+            // Create invoice if needed
+            if ($primary_booking_id && $building['category'] === 'berbayar') {
+                $total_building_cost = $building['price'];
+                if ($is_atm_building) {
+                    $total_building_cost = $building['price'] * 12;
+                } else {
+                    $total_building_cost = $building['price'] * count($dates);
+                }
                 
-                // Pastikan variabel $proposal_file ditaruh di parameter paling akhir
-                $insertStmt->execute([
-                    $building_id, 
-                    $booker_name, 
-                    $booker_phone, 
-                    $organization, 
-                    $event_name, 
-                    $date, 
-                    $start_time_use, 
-                    $end_time_use, 
-                    $admin_notes, 
-                    $proposal_file
-                ]);
+                if ($total_building_cost > 0) {
+                    $current_month_year = date('m-Y');
+                    $counterStmt = $pdo->query("SELECT setting_value FROM settings WHERE setting_key = 'invoice_counter'");
+                    $invoice_counter = $counterStmt ? (int)$counterStmt->fetchColumn() : 1;
+                    $monthStmt = $pdo->query("SELECT setting_value FROM settings WHERE setting_key = 'last_invoice_month'");
+                    $last_invoice_month = $monthStmt ? $monthStmt->fetchColumn() : null;
+
+                    if ($current_month_year !== $last_invoice_month) {
+                        $invoice_counter = 1;
+                        $pdo->prepare("UPDATE settings SET setting_value = ? WHERE setting_key = 'last_invoice_month'")->execute([$current_month_year]);
+                    }
+
+                    $invoice_id = date('mY') . '-' . str_pad($invoice_counter, 4, '0', STR_PAD_LEFT);
+                    $pdo->prepare("UPDATE settings SET setting_value = ? WHERE setting_key = 'invoice_counter'")->execute([$invoice_counter + 1]);
+
+                    $invoiceStmt = $pdo->prepare("INSERT INTO invoices (id, booking_id, amount) VALUES (?, ?, ?)");
+                    $invoiceStmt->execute([$invoice_id, $primary_booking_id, $total_building_cost]);
+                }
             }
 
             $pdo->commit();
@@ -253,7 +274,7 @@ include 'header.php';
 
         <div class="card border-0 shadow-sm">
             <div class="card-body p-4">
-                <form method="POST" enctype="multipart/form-data">
+                <form method="POST" enctype="multipart/form-data" id="bookingForm">
                     <div class="mb-4">
                         <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">Informasi Peminjam</h6>
                         <div class="row g-3">
@@ -277,7 +298,7 @@ include 'header.php';
                         <div class="row g-3">
                             <div class="col-12">
                                 <label class="form-label small fw-medium">Pilih Gedung</label>
-                                <select name="building_id" required class="form-select">
+                                <select name="building_id" required class="form-select" id="buildingSelect">
                                     <option value="">-- Pilih Gedung --</option>
                                     <?php foreach($buildings as $b): ?>
                                         <option value="<?= $b['id'] ?>"><?= htmlspecialchars($b['name']) ?></option>
@@ -288,54 +309,14 @@ include 'header.php';
                                 <label class="form-label small fw-medium">Nama Acara</label>
                                 <input type="text" name="event_name" required class="form-control">
                             </div>
-
                             <div class="col-12">
                                 <label class="form-label small fw-medium">Surat Permohonan/Proposal (PDF)</label>
                                 <input type="file" name="proposal_file" class="form-control">
                                 <div class="form-text xsmall mt-1"><i>Upload surat resmi permohonan peminjaman gedung.</i></div>
                             </div>
 
-                            <div class="col-12 mt-4">
-                                <div class="form-check mb-3">
-                                    <input type="checkbox" id="is_multi_day" name="is_multi_day" value="1" class="form-check-input">
-                                    <label class="form-check-label small" for="is_multi_day">
-                                        Booking untuk Beberapa Hari
-                                        <div class="form-text xsmall mt-1"><i>Centang apabila sewa lebih dari 1 (satu) hari.</i></div>
-                                    </label>
-                                </div>
-                                
-                                <div id="single-day-fields" class="row g-3">
-                                    <div class="col-md-4">
-                                        <label class="form-label small fw-medium">Tanggal</label>
-                                        <input type="date" name="booking_date" class="form-control">
-                                    </div>
-                                    <div class="col-md-4">
-                                        <label class="form-label small fw-medium">Jam Mulai</label>
-                                        <div class="input-group">
-                                            <span class="input-group-text bg-light border-0"><i class="bi bi-clock text-muted"></i></span>
-                                            <input type="text" name="start_time" id="start_time" class="form-control bg-light border-0 py-2 shadow-none timepicker" placeholder="--:--">
-                                        </div>
-                                    </div>
-                                    <div class="col-md-4">
-                                       <label class="form-label small fw-medium">Jam Selesai</label>
-                                        <div class="input-group">
-                                            <span class="input-group-text bg-light border-0"><i class="bi bi-clock-history text-muted"></i></span>
-                                            <input type="text" name="end_time" id="end_time" class="form-control bg-light border-0 py-2 shadow-none timepicker" placeholder="--:--">
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div id="multi-day-fields" class="row g-3 d-none">
-                                    <div class="col-md-6">
-                                        <label class="form-label small fw-bold text-secondary">Tanggal Mulai</label>
-                                        <input type="date" name="date_from" class="form-control">
-                                    </div>
-                                    <div class="col-md-6">
-                                        <label class="form-label small fw-bold text-secondary">Tanggal Selesai</label>
-                                        <input type="date" name="date_to" class="form-control">
-                                    </div>
-                                </div>
-                                <div class="form-text xsmall mt-2"><i>Catatan: Booking lebih dari 1 (satu) hari tidak membutuhkan jam. Untuk satu hari, jam wajib diisi.</i></div>
+                            <!-- Date/time fields container -->
+                            <div class="col-12 mt-4" id="dateTimeContainer">
                             </div>
 
                             <div class="col-12 mt-3">
@@ -381,31 +362,113 @@ include 'header.php';
         .fc .fc-daygrid-day-number { font-size: 0.9rem; color: #333; text-decoration: none; }
         .fc .fc-event { border: none; padding: 4px 8px; font-size: 0.75rem; border-radius: 20px; cursor: pointer; }
         .xsmall { font-size: 0.75rem; }
-    </style>
+</style>
 
-    <script>
+<script>
     document.addEventListener('DOMContentLoaded', function() {
-        // Multi-day sync logic
-        var cb = document.getElementById('is_multi_day');
-        var single = document.getElementById('single-day-fields');
-        var multi = document.getElementById('multi-day-fields');
+        const buildingSelect = document.getElementById('buildingSelect');
+        const dateTimeContainer = document.getElementById('dateTimeContainer');
         
-        function sync() {
-            if (cb.checked) {
-                multi.classList.remove('d-none');
-                single.classList.add('d-none');
-                single.querySelectorAll('input').forEach(i => i.required = false);
-                multi.querySelectorAll('input').forEach(i => i.required = true);
+        function updateDateTimeFields() {
+            const selectedOption = buildingSelect.options[buildingSelect.selectedIndex];
+            const buildingName = selectedOption.text;
+            const isAtm = buildingName.toLowerCase().includes('atm');
+            
+            if (isAtm) {
+                const currentYear = new Date().getFullYear();
+                let yearOptions = '';
+                for (let y = currentYear - 5; y <= currentYear + 5; y++) {
+                    yearOptions += `<option value="${y}">${y}</option>`;
+                }
+                dateTimeContainer.innerHTML = `
+                    <div class="mb-4">
+                        <label class="form-label small fw-bold text-secondary">Tahun Sewa</label>
+                        <select name="booking_year" class="form-select bg-light border-0 py-2 shadow-none" required>
+                            <option value="">-- Pilih Tahun --</option>
+                            ${yearOptions}
+                        </select>
+                    </div>
+                `;
             } else {
-                multi.classList.add('d-none');
-                single.classList.remove('d-none');
-                single.querySelectorAll('input').forEach(i => i.required = true);
-                multi.querySelectorAll('input').forEach(i => i.required = false);
+                dateTimeContainer.innerHTML = `
+                    <div class="form-check mb-3">
+                        <input type="checkbox" id="is_multi_day" name="is_multi_day" value="1" class="form-check-input">
+                        <label class="form-check-label small" for="is_multi_day">
+                            Booking untuk Beberapa Hari
+                            <div class="form-text xsmall mt-1"><i>Centang apabila sewa lebih dari 1 (satu) hari.</i></div>
+                        </label>
+                    </div>
+                    
+                    <div id="single-day-fields" class="row g-3">
+                        <div class="col-md-4">
+                            <label class="form-label small fw-medium">Tanggal</label>
+                            <input type="date" name="booking_date" class="form-control">
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-medium">Jam Mulai</label>
+                            <div class="input-group">
+                                <span class="input-group-text bg-light border-0"><i class="bi bi-clock text-muted"></i></span>
+                                <input type="text" name="start_time" id="start_time" class="form-control bg-light border-0 py-2 shadow-none timepicker" placeholder="--:--">
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                           <label class="form-label small fw-medium">Jam Selesai</label>
+                            <div class="input-group">
+                                <span class="input-group-text bg-light border-0"><i class="bi bi-clock-history text-muted"></i></span>
+                                <input type="text" name="end_time" id="end_time" class="form-control bg-light border-0 py-2 shadow-none timepicker" placeholder="--:--">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="multi-day-fields" class="row g-3 d-none">
+                        <div class="col-md-6">
+                            <label class="form-label small fw-bold text-secondary">Tanggal Mulai</label>
+                            <input type="date" name="date_from" class="form-control">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small fw-bold text-secondary">Tanggal Selesai</label>
+                            <input type="date" name="date_to" class="form-control">
+                        </div>
+                    </div>
+                    <div class="form-text xsmall mt-2"><i>Catatan: Booking lebih dari 1 (satu) hari tidak membutuhkan jam. Untuk satu hari, jam wajib diisi.</i></div>
+                `;
+                
+                // Re-attach multi-day sync logic
+                var cb = document.getElementById('is_multi_day');
+                var single = document.getElementById('single-day-fields');
+                var multi = document.getElementById('multi-day-fields');
+                
+                function sync() {
+                    if (cb.checked) {
+                        multi.classList.remove('d-none');
+                        single.classList.add('d-none');
+                        single.querySelectorAll('input').forEach(i => i.required = false);
+                        multi.querySelectorAll('input').forEach(i => i.required = true);
+                    } else {
+                        multi.classList.add('d-none');
+                        single.classList.remove('d-none');
+                        single.querySelectorAll('input').forEach(i => i.required = true);
+                        multi.querySelectorAll('input').forEach(i => i.required = false);
+                    }
+                }
+                cb.addEventListener('change', sync);
+                sync();
+                
+                // Re-initialize pickers
+                updatePickers(buildingName);
             }
         }
-        cb.addEventListener('change', sync);
-        sync();
-
+        
+        buildingSelect.addEventListener('change', function() {
+            updateDateTimeFields();
+            
+            if (this.value) {
+                calendarTitleText.innerText = "Ketersediaan Jadwal : " + this.options[this.selectedIndex].text;
+            } else {
+                calendarTitleText.innerText = "Ketersediaan Jadwal : Silakan pilih gedung";
+            }
+        });
+        
         // Flatpickr initialization with dynamic restrictions
         let timePickerConfig = {
             enableTime: true,
@@ -417,7 +480,6 @@ include 'header.php';
         };
 
         let datePickerConfig = {
-            minDate: "<?= date('Y-m-d', strtotime('+3 days')) ?>",
             locale: "id",
             dateFormat: "Y-m-d"
         };
@@ -425,6 +487,8 @@ include 'header.php';
         let startTimePicker, endTimePicker, bookingDatePicker, dateFromPicker, dateToPicker;
 
         function updatePickers(buildingName) {
+            if (!buildingName) return;
+            
             const name = buildingName.toLowerCase();
             let currentTimeConfig = { ...timePickerConfig };
             let currentDateConfig = { ...datePickerConfig };
@@ -440,16 +504,22 @@ include 'header.php';
                 currentDateConfig.disable = [
                     function(date) { return (date.getDay() === 4); } // 4 = Thursday
                 ];
-                document.getElementById('start_time').placeholder = "07:00";
-                document.getElementById('end_time').placeholder = "17:00";
+                const st = document.getElementById('start_time');
+                const et = document.getElementById('end_time');
+                if (st) st.placeholder = "07:00";
+                if (et) et.placeholder = "17:00";
             } else if (name.includes('balai rakyat') && name.includes('malam hari')) {
                 currentTimeConfig.minTime = "18:00";
                 currentTimeConfig.maxTime = "06:00";
-                document.getElementById('start_time').placeholder = "18:00";
-                document.getElementById('end_time').placeholder = "06:00";
+                const st = document.getElementById('start_time');
+                const et = document.getElementById('end_time');
+                if (st) st.placeholder = "18:00";
+                if (et) et.placeholder = "06:00";
             } else {
-                document.getElementById('start_time').placeholder = "--:--";
-                document.getElementById('end_time').placeholder = "--:--";
+                const st = document.getElementById('start_time');
+                const et = document.getElementById('end_time');
+                if (st) st.placeholder = "--:--";
+                if (et) et.placeholder = "--:--";
             }
 
             // Re-init pickers
@@ -459,28 +529,14 @@ include 'header.php';
             if (dateFromPicker) dateFromPicker.destroy();
             if (dateToPicker) dateToPicker.destroy();
 
-            startTimePicker = flatpickr("#start_time", currentTimeConfig);
-            endTimePicker = flatpickr("#end_time", currentTimeConfig);
-            bookingDatePicker = flatpickr('input[name="booking_date"]', currentDateConfig);
-            dateFromPicker = flatpickr('input[name="date_from"]', currentDateConfig);
-            dateToPicker = flatpickr('input[name="date_to"]', currentDateConfig);
-        }
-
-        const buildingSelect = document.querySelector('select[name="building_id"]');
-        
-        buildingSelect.addEventListener('change', function() {
-            const buildingName = this.options[this.selectedIndex].text;
-            updatePickers(buildingName);
-            
-            if (this.value) {
-                calendarTitleText.innerText = "Ketersediaan Jadwal : " + buildingName;
-            } else {
-                calendarTitleText.innerText = "Ketersediaan Jadwal : Silakan pilih gedung";
+            if (document.getElementById('start_time')) {
+                startTimePicker = flatpickr("#start_time", currentTimeConfig);
+                endTimePicker = flatpickr("#end_time", currentTimeConfig);
+                bookingDatePicker = flatpickr('input[name="booking_date"]', currentDateConfig);
+                dateFromPicker = flatpickr('input[name="date_from"]', currentDateConfig);
+                dateToPicker = flatpickr('input[name="date_to"]', currentDateConfig);
             }
-        });
-
-        // Initial call
-        updatePickers(buildingSelect.options[buildingSelect.selectedIndex].text);
+        }
 
         const calendarTitleText = document.getElementById('calendar-title-text');
         const calendarModalLabel = document.getElementById('calendarModalLabel');
@@ -506,18 +562,18 @@ include 'header.php';
                     right: 'dayGridMonth,listMonth'
                 },
                 locale: 'id',
-                events: '../api_calendar.php' + (buildingId ? '?building_id=' + buildingId : ''),
+                events: '../api_calendar.php' + (buildingId ? '?building_id=' . buildingId : ''),
                 eventClick: function(info) {
                     const start = info.event.start;
                     const end = info.event.end;
                     const startStr = start ? start.toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit', hour12: false}) : '';
                     const endStr = end ? end.toLocaleTimeString('id-ID', {hour:'2-digit', minute:'2-digit', hour12: false}) : '';
-                    const buildingName = info.event.extendedProps && info.event.extendedProps.building_name ? info.event.extendedProps.building_name : '';
+                    const bName = info.event.extendedProps && info.event.extendedProps.building_name ? info.event.extendedProps.building_name : '';
                     const description = info.event.extendedProps && info.event.extendedProps.description ? info.event.extendedProps.description : '';
 
                     const msg = `
                         <strong>Acara:</strong> ${info.event.title}<br>
-                        <strong>Gedung:</strong> ${buildingName}<br>
+                        <strong>Gedung:</strong> ${bName}<br>
                         <strong>Waktu:</strong> ${startStr} WITA s.d ${endStr ? endStr : 'selesai'} WITA
                         ${description ? '<br><div class="mt-2 text-danger small"><em>' + description + '</em></div>' : ''}
                     `;
@@ -528,27 +584,15 @@ include 'header.php';
             });
             
             calendarModal.show();
-            // Delay render slightly to ensure modal is visible for FullCalendar calculations
             setTimeout(() => {
                 calendar.render();
             }, 200);
         }
 
-    btnShowCalendar.addEventListener('click', function() {
-        const buildingId = buildingSelect.value;
-        const buildingName = buildingSelect.options[buildingSelect.selectedIndex].text;
-        
-        // Always show calendar, either filtered or all
-        initCalendar(buildingId, buildingName);
+        btnShowCalendar.addEventListener('click', function() {
+            const buildingId = buildingSelect.value;
+            const buildingName = buildingSelect.options[buildingSelect.selectedIndex].text;
+            initCalendar(buildingId, buildingName);
+        });
     });
-
-    buildingSelect.addEventListener('change', function() {
-        const buildingName = this.options[this.selectedIndex].text;
-        if (this.value) {
-            calendarTitleText.innerText = "Ketersediaan Jadwal : " + buildingName;
-        } else {
-            calendarTitleText.innerText = "Ketersediaan Jadwal : Silakan pilih gedung";
-        }
-    });
-});
 </script>
