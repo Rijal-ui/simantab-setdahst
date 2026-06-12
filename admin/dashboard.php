@@ -12,8 +12,22 @@ if (isset($_POST['action']) && isset($_POST['booking_id'])) {
     $status = $_POST['action'] === 'approve' ? 'approved' : 'rejected';
     $booking_id = $_POST['booking_id'];
     
-    $stmt = $pdo->prepare("UPDATE bookings SET status = ? WHERE id = ?");
-    $stmt->execute([$status, $booking_id]);
+    // First get the booking details to find other bookings in the same group
+    $stmt = $pdo->prepare("SELECT * FROM bookings WHERE id = ?");
+    $stmt->execute([$booking_id]);
+    $booking = $stmt->fetch(PDO::FETCH_ASSOC);
+    
+    if ($booking) {
+        // Update all bookings that belong to the same group
+        $updateStmt = $pdo->prepare("
+            UPDATE bookings 
+            SET status = ? 
+            WHERE event_name = ? 
+            AND booker_name = ? 
+            AND building_id = ?
+        ");
+        $updateStmt->execute([$status, $booking['event_name'], $booking['booker_name'], $booking['building_id']]);
+    }
 }
 
 // Handle search
@@ -38,7 +52,45 @@ if ($search_query) {
         ORDER BY b.created_at DESC
     ");
 }
-$bookings = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$all_bookings = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Group bookings that are part of multi-day booking
+$grouped_bookings = [];
+$processed_ids = [];
+
+foreach ($all_bookings as $booking) {
+    if (in_array($booking['id'], $processed_ids)) {
+        continue;
+    }
+    
+    // Find all bookings that belong to the same group
+    $group = [
+        'main_booking' => $booking,
+        'dates' => [$booking['booking_date']],
+        'booking_ids' => [$booking['id']]
+    ];
+    $processed_ids[] = $booking['id'];
+    
+    foreach ($all_bookings as $other_booking) {
+        if ($other_booking['id'] == $booking['id']) continue;
+        if (in_array($other_booking['id'], $processed_ids)) continue;
+        
+        // Same event name, same booker name, same building id
+        if (
+            $other_booking['event_name'] == $booking['event_name'] &&
+            $other_booking['booker_name'] == $booking['booker_name'] &&
+            $other_booking['building_id'] == $booking['building_id']
+        ) {
+            $group['dates'][] = $other_booking['booking_date'];
+            $group['booking_ids'][] = $other_booking['id'];
+            $processed_ids[] = $other_booking['id'];
+        }
+    }
+    
+    // Sort dates
+    sort($group['dates']);
+    $grouped_bookings[] = $group;
+}
 
 include 'header.php';
 ?>
@@ -48,7 +100,7 @@ include 'header.php';
     <form method="GET" class="d-flex align-items-center gap-2">
         <div class="input-group">
             <span class="input-group-text bg-light border-0"><i class="bi bi-search"></i></span>
-            <input type="text" name="search" class="form-control border-0 bg-light" placeholder="Cari nama gedung atau peminjam..." value="<?= htmlspecialchars($search_query) ?>">
+            <input type="text" name="search" class="form-control border-0 bg-light" placeholder="Pencarian" value="<?= htmlspecialchars($search_query) ?>">
         </div>
         <?php if ($search_query): ?>
             <a href="dashboard.php" class="btn btn-outline-secondary">Reset</a>
@@ -70,14 +122,34 @@ include 'header.php';
                 </tr>
             </thead>
             <tbody class="border-top-0">
-                <?php if (count($bookings) > 0): ?>
-                    <?php foreach($bookings as $booking): ?>
+                <?php if (count($grouped_bookings) > 0): ?>
+                    <?php foreach($grouped_bookings as $group): ?>
+                    <?php $booking = $group['main_booking']; $dates = $group['dates']; $is_multi_day = count($dates) > 1; ?>
                     <tr>
                         <td class="px-4 py-4">
-                            <div class="fw-bold"><?= date('d M Y', strtotime($booking['booking_date'])) ?></div>
-                            <div class="text-muted small">
-                                <?= date('H:i', strtotime($booking['start_time'])) ?> WITA s.d <?= date('H:i', strtotime($booking['end_time'])) ?> WITA
-                            </div>
+                            <?php if ($is_multi_day): ?>
+                                <?php 
+                                $start_date = $dates[0];
+                                $end_date = $dates[count($dates)-1];
+                                $start_month_year = date('M Y', strtotime($start_date));
+                                $end_month_year = date('M Y', strtotime($end_date));
+                                
+                                if ($start_month_year == $end_month_year) {
+                                    $date_range = date('d', strtotime($start_date)) . '-' . date('d M Y', strtotime($end_date));
+                                } else {
+                                    $date_range = date('d M', strtotime($start_date)) . ' - ' . date('d M Y', strtotime($end_date));
+                                }
+                                ?>
+                                <div class="fw-bold"><?= $date_range ?></div>
+                                <div class="text-muted small">
+                                    Beberapa hari (<?= count($dates) ?> hari)
+                                </div>
+                            <?php else: ?>
+                                <div class="fw-bold"><?= date('d M Y', strtotime($booking['booking_date'])) ?></div>
+                                <div class="text-muted small">
+                                    <?= date('H:i', strtotime($booking['start_time'])) ?> WITA s.d <?= date('H:i', strtotime($booking['end_time'])) ?> WITA
+                                </div>
+                            <?php endif; ?>
                         </td>
                         <td class="px-4 py-4">
                             <div class="d-flex align-items-center">
@@ -133,9 +205,17 @@ include 'header.php';
                             </span>
                             
                             <?php 
-                            $invoiceStmt = $pdo->prepare("SELECT id, status FROM invoices WHERE booking_id = ?");
-                            $invoiceStmt->execute([$booking['id']]);
-                            $invoice = $invoiceStmt->fetch(PDO::FETCH_ASSOC);
+                            // Find invoice for any of the booking IDs in the group
+                            $invoice = null;
+                            foreach ($group['booking_ids'] as $bid) {
+                                $invoiceStmt = $pdo->prepare("SELECT id, status FROM invoices WHERE booking_id = ?");
+                                $invoiceStmt->execute([$bid]);
+                                $inv = $invoiceStmt->fetch(PDO::FETCH_ASSOC);
+                                if ($inv) {
+                                    $invoice = $inv;
+                                    break;
+                                }
+                            }
                             if ($invoice): 
                                 $invColors = [
                                     'unpaid' => 'text-warning',

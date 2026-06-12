@@ -18,6 +18,26 @@ if (!$booking) {
     exit;
 }
 
+// Find all other bookings in the same group
+$group_stmt = $pdo->prepare("
+    SELECT * FROM bookings 
+    WHERE event_name = ? 
+    AND booker_name = ? 
+    AND building_id = ?
+    ORDER BY booking_date ASC
+");
+$group_stmt->execute([$booking['event_name'], $booking['booker_name'], $booking['building_id']]);
+$group_bookings = $group_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+$is_multi_day = count($group_bookings) > 1;
+$group_dates = [];
+foreach ($group_bookings as $gb) {
+    $group_dates[] = $gb['booking_date'];
+}
+
+$group_start_date = $group_dates[0];
+$group_end_date = $group_dates[count($group_dates)-1];
+
 // Fetch all available add-on items
 $itemsStmt = $pdo->query("SELECT * FROM items ORDER BY name");
 $available_items = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
@@ -49,11 +69,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $temp_building = $temp_building_stmt->fetch(PDO::FETCH_ASSOC);
     $is_atm = stripos($temp_building['name'], 'ATM') !== false;
     
+    // Handle date for multi-day booking
+    $is_multi_day_post = isset($_POST['is_multi_day']) && $_POST['is_multi_day'] === '1';
+    
     if ($is_atm) {
         $booking_year = $_POST['booking_year'] ?? date('Y');
         $booking_date = $booking_year . '-01-01';
         $start_time = '00:00:00';
         $end_time = '23:59:59';
+    } elseif ($is_multi_day_post) {
+        $date_from = $_POST['date_from'];
+        $date_to = $_POST['date_to'];
+        $start_time = '00:00:00';
+        $end_time = '23:59:59';
+        $booking_date = $date_from;
     } else {
         $booking_date = $_POST['booking_date'];
         $start_time = $_POST['start_time'];
@@ -93,9 +122,60 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             $pdo->beginTransaction();
 
-            // Update booking
-            $stmt = $pdo->prepare("UPDATE bookings SET building_id=?, booker_name=?, booker_email=?, booker_phone=?, organization=?, event_name=?, event_description=?, booking_date=?, start_time=?, end_time=?, status=?, admin_notes=?, proposal_file=? WHERE id=?");
-            $stmt->execute([$building_id, $booker_name, $booker_email, $booker_phone, $organization, $event_name, $event_description, $booking_date, $start_time, $end_time, $status, $admin_notes, $proposal_file, $id]);
+            if ($is_multi_day_post) {
+                // For multi-day booking: delete existing and create new range
+                // First delete all old booking items
+                foreach ($group_bookings as $gb) {
+                    $pdo->prepare("DELETE FROM booking_items WHERE booking_id = ?")->execute([$gb['id']]);
+                }
+                
+                // Delete old bookings
+                $pdo->prepare("DELETE FROM bookings WHERE event_name = ? AND booker_name = ? AND building_id = ?")
+                    ->execute([$booking['event_name'], $booking['booker_name'], $booking['building_id']]);
+                
+                // Create new range of bookings
+                $start = new DateTime($date_from);
+                $end = new DateTime($date_to);
+                $end->modify('+1 day');
+                
+                $interval = new DateInterval('P1D');
+                $period = new DatePeriod($start, $interval, $end);
+                
+                $new_booking_ids = [];
+                $primary_booking_id = null;
+                
+                foreach ($period as $dt) {
+                    $current_date = $dt->format('Y-m-d');
+                    
+                    $insertStmt = $pdo->prepare("INSERT INTO bookings (building_id, booker_name, booker_email, booker_phone, organization, event_name, event_description, booking_date, start_time, end_time, status, admin_notes, proposal_file) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                    $insertStmt->execute([$building_id, $booker_name, $booker_email, $booker_phone, $organization, $event_name, $event_description, $current_date, $start_time, $end_time, $status, $admin_notes, $proposal_file]);
+                    
+                    $new_bid = $pdo->lastInsertId();
+                    $new_booking_ids[] = $new_bid;
+                    if ($primary_booking_id === null) {
+                        $primary_booking_id = $new_bid;
+                    }
+                }
+                
+                // Update main booking id for redirect
+                $id = $primary_booking_id;
+            } else {
+                // For single-day booking: update main booking and convert multi-day to single if needed
+                if ($is_multi_day && count($group_bookings) > 1) {
+                    // Delete other bookings in group except this one
+                    foreach ($group_bookings as $gb) {
+                        if ($gb['id'] != $id) {
+                            $pdo->prepare("DELETE FROM booking_items WHERE booking_id = ?")->execute([$gb['id']]);
+                            $pdo->prepare("DELETE FROM invoices WHERE booking_id = ?")->execute([$gb['id']]);
+                            $pdo->prepare("DELETE FROM bookings WHERE id = ?")->execute([$gb['id']]);
+                        }
+                    }
+                }
+                
+                // Update the main booking
+                $stmt = $pdo->prepare("UPDATE bookings SET building_id=?, booker_name=?, booker_email=?, booker_phone=?, organization=?, event_name=?, event_description=?, booking_date=?, start_time=?, end_time=?, status=?, admin_notes=?, proposal_file=? WHERE id=?");
+                $stmt->execute([$building_id, $booker_name, $booker_email, $booker_phone, $organization, $event_name, $event_description, $booking_date, $start_time, $end_time, $status, $admin_notes, $proposal_file, $id]);
+            }
 
             // Get current building info
             $building_stmt = $pdo->prepare("SELECT * FROM buildings WHERE id = ?");
@@ -106,7 +186,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $total_item_price = 0;
             if (trim($building['name']) !== 'Ruang Rapat Sekretariat Daerah Kab. Hulu Sungai Tengah' && $building['category'] !== 'gratis' && !$is_atm) {
                 // Delete old items first
-                $pdo->prepare("DELETE FROM booking_items WHERE booking_id = ?")->execute([$id]);
+                if ($is_multi_day_post) {
+                    foreach ($new_booking_ids as $bid) {
+                        $pdo->prepare("DELETE FROM booking_items WHERE booking_id = ?")->execute([$bid]);
+                    }
+                } else {
+                    $pdo->prepare("DELETE FROM booking_items WHERE booking_id = ?")->execute([$id]);
+                }
                 
                 $ordered_items = $_POST['items'] ?? [];
                 foreach ($available_items as $item) {
@@ -115,37 +201,61 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $price_at_booking = $item['price_per_unit'];
                         $total_item_price += $quantity * $price_at_booking;
 
-                        $itemStmt = $pdo->prepare("INSERT INTO booking_items (booking_id, item_id, quantity, price_at_booking) VALUES (?, ?, ?, ?)");
-                        $itemStmt->execute([$id, $item['id'], $quantity, $price_at_booking]);
+                        // Insert for all bookings in group
+                        $booking_ids_to_process = $is_multi_day_post ? $new_booking_ids : [$id];
+                        foreach ($booking_ids_to_process as $bid) {
+                            $itemStmt = $pdo->prepare("INSERT INTO booking_items (booking_id, item_id, quantity, price_at_booking) VALUES (?, ?, ?, ?)");
+                            $itemStmt->execute([$bid, $item['id'], $quantity, $price_at_booking]);
+                        }
                     }
                 }
             } else {
                 // If building is free, Ruang Rapat Setda, or ATM, delete all items
-                $pdo->prepare("DELETE FROM booking_items WHERE booking_id = ?")->execute([$id]);
+                $booking_ids_to_process = $is_multi_day_post ? $new_booking_ids : [$id];
+                foreach ($booking_ids_to_process as $bid) {
+                    $pdo->prepare("DELETE FROM booking_items WHERE booking_id = ?")->execute([$bid]);
+                }
                 $total_item_price = 0;
             }
 
-            // Calculate invoice amount and update
+            // Calculate invoice amount
             $building_price_per_day = ($building['category'] === 'berbayar' ? $building['price'] : 0);
             
             if ($is_atm) {
                 $total_building_cost = $building_price_per_day * 12;
             } else {
-                $total_building_cost = $building_price_per_day; // 1 day for edit
+                $num_days = $is_multi_day_post ? count($new_booking_ids) : 1;
+                $total_building_cost = $building_price_per_day * $num_days;
             }
             
             $final_amount = $total_building_cost + $total_item_price;
 
-            // Check if there's an existing invoice
-            $invoice_stmt = $pdo->prepare("SELECT * FROM invoices WHERE booking_id = ?");
-            $invoice_stmt->execute([$id]);
-            $existing_invoice = $invoice_stmt->fetch(PDO::FETCH_ASSOC);
+            // Find existing invoice
+            $existing_invoice = null;
+            if ($is_multi_day) {
+                foreach ($group_bookings as $gb) {
+                    $invoice_stmt = $pdo->prepare("SELECT * FROM invoices WHERE booking_id = ?");
+                    $invoice_stmt->execute([$gb['id']]);
+                    $inv = $invoice_stmt->fetch(PDO::FETCH_ASSOC);
+                    if ($inv) {
+                        $existing_invoice = $inv;
+                        break;
+                    }
+                }
+            } else {
+                $invoice_stmt = $pdo->prepare("SELECT * FROM invoices WHERE booking_id = ?");
+                $invoice_stmt->execute([$id]);
+                $existing_invoice = $invoice_stmt->fetch(PDO::FETCH_ASSOC);
+            }
 
             if ($final_amount > 0) {
+                // Determine which booking to attach invoice to
+                $invoice_booking_id = $is_multi_day_post ? $primary_booking_id : $id;
+                
                 if ($existing_invoice) {
                     // Update existing invoice
-                    $update_invoice_stmt = $pdo->prepare("UPDATE invoices SET amount = ? WHERE id = ?");
-                    $update_invoice_stmt->execute([$final_amount, $existing_invoice['id']]);
+                    $update_invoice_stmt = $pdo->prepare("UPDATE invoices SET amount = ?, booking_id = ? WHERE id = ?");
+                    $update_invoice_stmt->execute([$final_amount, $invoice_booking_id, $existing_invoice['id']]);
                 } else {
                     // Create new invoice if needed
                     $current_month_year = date('m-Y');
@@ -163,7 +273,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $pdo->prepare("UPDATE settings SET setting_value = ? WHERE setting_key = 'invoice_counter'")->execute([$invoice_counter + 1]);
 
                     $invoiceStmt = $pdo->prepare("INSERT INTO invoices (id, booking_id, amount) VALUES (?, ?, ?)");
-                    $invoiceStmt->execute([$invoice_id, $id, $final_amount]);
+                    $invoiceStmt->execute([$invoice_id, $invoice_booking_id, $final_amount]);
                 }
             } else {
                 // If final amount is 0, delete invoice if exists
@@ -179,6 +289,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt = $pdo->prepare("SELECT b.*, g.name as building_name, g.category as building_category, g.price as building_price FROM bookings b JOIN buildings g ON b.building_id = g.id WHERE b.id = ?");
             $stmt->execute([$id]);
             $booking = $stmt->fetch(PDO::FETCH_ASSOC);
+            
+            // Refresh group data
+            $group_stmt = $pdo->prepare("
+                SELECT * FROM bookings 
+                WHERE event_name = ? 
+                AND booker_name = ? 
+                AND building_id = ?
+                ORDER BY booking_date ASC
+            ");
+            $group_stmt->execute([$booking['event_name'], $booking['booker_name'], $booking['building_id']]);
+            $group_bookings = $group_stmt->fetchAll(PDO::FETCH_ASSOC);
+            
+            $is_multi_day = count($group_bookings) > 1;
+            $group_dates = [];
+            foreach ($group_bookings as $gb) {
+                $group_dates[] = $gb['booking_date'];
+            }
+            
+            $group_start_date = $group_dates[0];
+            $group_end_date = $group_dates[count($group_dates)-1];
             
             // Refresh current items
             $current_items = [];
@@ -221,6 +351,14 @@ include 'header.php';
             <div class="row g-4">
                 <!-- Main Info -->
                 <div class="col-md-8">
+                    <?php if ($is_multi_day): ?>
+                        <div class="alert alert-info border-0 shadow-sm mb-4">
+                            <i class="bi bi-info-circle me-2"></i> 
+                            Booking ini terdiri dari <?= count($group_bookings) ?> hari: 
+                            <strong><?= date('d M Y', strtotime($group_start_date)) ?></strong> - <strong><?= date('d M Y', strtotime($group_end_date)) ?></strong>
+                        </div>
+                    <?php endif; ?>
+                    
                     <div class="card border-0 shadow-sm rounded-3 mb-4">
                         <div class="card-body p-4">
                             <h5 class="fw-bold mb-4 text-dark border-bottom pb-2">Informasi Peminjam & Acara</h5>
@@ -269,25 +407,57 @@ include 'header.php';
                                 $is_atm_booking = stripos($booking['building_name'], 'ATM') !== false;
                                 if (!$is_atm_booking): 
                                 ?>
-                                <div class="col-md-4">
-                                    <label class="form-label small fw-bold text-secondary">Tanggal</label>
-                                    <div class="input-group">
-                                        <span class="input-group-text bg-light border-0"><i class="bi bi-calendar text-muted"></i></span>
-                                        <input type="date" name="booking_date" value="<?= htmlspecialchars($booking['booking_date']) ?>" required class="form-control bg-light border-0 py-2 shadow-none">
+                                <div class="col-12 mb-2">
+                                    <div class="form-check">
+                                        <input type="checkbox" id="is_multi_day" name="is_multi_day" value="1" class="form-check-input" <?= $is_multi_day ? 'checked' : '' ?>>
+                                        <label class="form-check-label small" for="is_multi_day">
+                                            Booking untuk Beberapa Hari
+                                        </label>
                                     </div>
                                 </div>
-                                <div class="col-md-4">
-                                    <label class="form-label small fw-bold text-secondary">Jam Mulai</label>
-                                    <div class="input-group">
-                                        <span class="input-group-text bg-light border-0"><i class="bi bi-clock text-muted"></i></span>
-                                        <input type="text" name="start_time" value="<?= date('H:i', strtotime($booking['start_time'])) ?>" required class="form-control bg-light border-0 py-2 shadow-none timepicker">
+                                
+                                <div id="single-day-fields" class="col-12 <?= $is_multi_day ? 'd-none' : '' ?>">
+                                    <div class="row g-3">
+                                        <div class="col-md-4">
+                                            <label class="form-label small fw-bold text-secondary">Tanggal</label>
+                                            <div class="input-group">
+                                                <span class="input-group-text bg-light border-0"><i class="bi bi-calendar text-muted"></i></span>
+                                                <input type="date" name="booking_date" value="<?= htmlspecialchars($booking['booking_date']) ?>" required class="form-control bg-light border-0 py-2 shadow-none">
+                                            </div>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label small fw-bold text-secondary">Jam Mulai</label>
+                                            <div class="input-group">
+                                                <span class="input-group-text bg-light border-0"><i class="bi bi-clock text-muted"></i></span>
+                                                <input type="text" name="start_time" value="<?= date('H:i', strtotime($booking['start_time'])) ?>" required class="form-control bg-light border-0 py-2 shadow-none timepicker">
+                                            </div>
+                                        </div>
+                                        <div class="col-md-4">
+                                            <label class="form-label small fw-bold text-secondary">Jam Selesai</label>
+                                            <div class="input-group">
+                                                <span class="input-group-text bg-light border-0"><i class="bi bi-clock-history text-muted"></i></span>
+                                                <input type="text" name="end_time" value="<?= date('H:i', strtotime($booking['end_time'])) ?>" required class="form-control bg-light border-0 py-2 shadow-none timepicker">
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
-                                <div class="col-md-4">
-                                    <label class="form-label small fw-bold text-secondary">Jam Selesai</label>
-                                    <div class="input-group">
-                                        <span class="input-group-text bg-light border-0"><i class="bi bi-clock-history text-muted"></i></span>
-                                        <input type="text" name="end_time" value="<?= date('H:i', strtotime($booking['end_time'])) ?>" required class="form-control bg-light border-0 py-2 shadow-none timepicker">
+                                
+                                <div id="multi-day-fields" class="col-12 <?= $is_multi_day ? '' : 'd-none' ?>">
+                                    <div class="row g-3">
+                                        <div class="col-md-6">
+                                            <label class="form-label small fw-bold text-secondary">Tanggal Mulai</label>
+                                            <div class="input-group">
+                                                <span class="input-group-text bg-light border-0"><i class="bi bi-calendar text-muted"></i></span>
+                                                <input type="date" name="date_from" value="<?= htmlspecialchars($group_start_date) ?>" required class="form-control bg-light border-0 py-2 shadow-none">
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label class="form-label small fw-bold text-secondary">Tanggal Selesai</label>
+                                            <div class="input-group">
+                                                <span class="input-group-text bg-light border-0"><i class="bi bi-calendar text-muted"></i></span>
+                                                <input type="date" name="date_to" value="<?= htmlspecialchars($group_end_date) ?>" required class="form-control bg-light border-0 py-2 shadow-none">
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
                                 <?php else: ?>
@@ -417,6 +587,25 @@ document.addEventListener('DOMContentLoaded', function() {
         locale: "id",
         allowInput: true
     });
+    
+    // Handle multi-day toggle
+    const multiDayCheckbox = document.getElementById('is_multi_day');
+    if (multiDayCheckbox) {
+        const singleDayFields = document.getElementById('single-day-fields');
+        const multiDayFields = document.getElementById('multi-day-fields');
+        
+        function toggleFields() {
+            if (multiDayCheckbox.checked) {
+                singleDayFields.classList.add('d-none');
+                multiDayFields.classList.remove('d-none');
+            } else {
+                singleDayFields.classList.remove('d-none');
+                multiDayFields.classList.add('d-none');
+            }
+        }
+        
+        multiDayCheckbox.addEventListener('change', toggleFields);
+    }
 });
 </script>
 
