@@ -99,7 +99,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     // Restriction: Maximum H-3 (Booking must be at least 3 days before the event) - DISABLED
-    /*
     if (!$error) {
         $today = new DateTime();
         $today->setTime(0, 0, 0);
@@ -117,7 +116,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
     }
-    */
 
     if (!$error) {
         // Check availability & create bookings
@@ -536,7 +534,7 @@ include 'header.php';
                                         <div id="single-day-fields" class="row g-3">
                                             <div class="col-md-4">
                                                 <label class="form-label small fw-medium">Tanggal</label>
-                                                <input type="date" name="booking_date" class="form-control">
+                                                <input type="date" name="booking_date" class="form-control" min="<?= date('Y-m-d', strtotime('+3 days')) ?>">
                                             </div>
                                             <div class="col-md-4">
                                                 <label class="form-label small fw-medium">Jam Mulai</label>
@@ -557,11 +555,11 @@ include 'header.php';
                                         <div id="multi-day-fields" class="row g-3 d-none">
                                             <div class="col-md-4">
                                                 <label class="form-label small fw-bold text-secondary">Tanggal Mulai</label>
-                                                <input type="date" name="date_from" class="form-control">
+                                                <input type="date" name="date_from" class="form-control" min="<?= date('Y-m-d', strtotime('+3 days')) ?>">
                                             </div>
                                             <div class="col-md-4">
                                                 <label class="form-label small fw-bold text-secondary">Tanggal Selesai</label>
-                                                <input type="date" name="date_to" class="form-control">
+                                                <input type="date" name="date_to" class="form-control" min="<?= date('Y-m-d', strtotime('+3 days')) ?>">
                                             </div>
                                         </div>
                                         <div class="form-text xsmall mt-1"><i>Catatan: Booking lebih dari 1 (satu) hari tidak membutuhkan jam. Untuk satu hari, jam wajib diisi.</i></div>
@@ -610,7 +608,7 @@ include 'header.php';
                             <?php endif; ?>
 
                             <div class="mt-4">
-                                <button type="submit" class="btn btn-primary w-100 py-2 fw-bold">
+                                <button type="button" class="btn btn-primary w-100 py-2 fw-bold" data-bs-toggle="modal" data-bs-target="#bookingSummaryModal">
                                     Ajukan Booking
                                 </button>
                                 <a href="index.php" class="btn btn-link w-100 mt-2 text-secondary text-decoration-none small">Kembali ke Beranda</a>
@@ -629,10 +627,166 @@ include 'header.php';
     </div>
 </div>
 
+<?php if ($building): ?>
+<!-- Modal Ringkasan Booking -->
+<div class="modal fade" id="bookingSummaryModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="false">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow">
+            <div class="modal-header border-bottom-0">
+                <h5 class="modal-title fw-bold">Ringkasan Booking</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body py-4">
+                <div id="summaryContent" class="text-muted"></div>
+            </div>
+            <div class="modal-footer border-top-0">
+                <button type="button" class="btn btn-light" data-bs-dismiss="modal">Batal</button>
+                <button type="button" class="btn btn-primary" id="confirmBookingBtn">
+                    <i class="bi bi-send me-1"></i> Ajukan Booking
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const bookingForm = document.querySelector('form[enctype="multipart/form-data"]');
+    const summaryModal = new bootstrap.Modal(document.getElementById('bookingSummaryModal'));
+    const summaryContent = document.getElementById('summaryContent');
+    const confirmBookingBtn = document.getElementById('confirmBookingBtn');
+
+    // Format date Indonesia
+    function formatDateIndo(dateStr) {
+        if (!dateStr) return '';
+        const date = new Date(dateStr);
+        const options = { year: 'numeric', month: 'long', day: 'numeric' };
+        return date.toLocaleDateString('id-ID', options);
+    }
+
+    // Format number Indonesia
+    function formatNumber(num) {
+        return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    }
+
+    // Populate summary content when modal is shown
+    document.querySelector('[data-bs-target="#bookingSummaryModal"]').addEventListener('click', function() {
+        let summaryHTML = '';
+        
+        // Get building info
+        const buildingName = "<?= htmlspecialchars($building['name'] ?? '') ?>";
+        
+        // Get form values
+        const bookerName = document.querySelector('input[name="booker_name"]')?.value;
+        const bookerPhone = document.querySelector('input[name="booker_phone"]')?.value;
+        const bookerEmail = document.querySelector('input[name="booker_email"]')?.value;
+        const organization = document.querySelector('input[name="organization"]')?.value;
+        const eventName = document.querySelector('input[name="event_name"]')?.value;
+        const eventDesc = document.querySelector('textarea[name="event_description"]')?.value;
+        const proposalFile = document.querySelector('input[name="proposal_file"]')?.files[0]?.name;
+
+        const isAtm = "<?= stripos($building['name'] ?? '', 'ATM') !== false ? '1' : '0' ?>";
+        
+        let dateInfo = '';
+        if (isAtm === '1') {
+            const bookingYear = document.querySelector('select[name="booking_year"]')?.value;
+            dateInfo = `<strong>Tahun Sewa:</strong> ${bookingYear}`;
+        } else {
+            const isMultiDay = document.getElementById('is_multi_day')?.checked;
+            if (isMultiDay) {
+                const dateFrom = document.querySelector('input[name="date_from"]')?.value;
+                const dateTo = document.querySelector('input[name="date_to"]')?.value;
+                dateInfo = `<strong>Tanggal:</strong> ${formatDateIndo(dateFrom)} s.d ${formatDateIndo(dateTo)} (${Math.ceil((new Date(dateTo) - new Date(dateFrom)) / (1000 * 60 * 60 * 24)) + 1} hari)`;
+            } else {
+                const bookingDate = document.querySelector('input[name="booking_date"]')?.value;
+                const startTime = document.querySelector('input[name="start_time"]')?.value;
+                const endTime = document.querySelector('input[name="end_time"]')?.value;
+                dateInfo = `<strong>Tanggal:</strong> ${formatDateIndo(bookingDate)}<br>`;
+                dateInfo += `<strong>Waktu:</strong> ${startTime} WITA s.d ${endTime} WITA`;
+            }
+        }
+
+        // Build summary
+        summaryHTML = `
+            <div class="row g-3">
+                <div class="col-12">
+                    <div class="fw-bold text-primary mb-3">📍 ${buildingName}</div>
+                </div>
+                <div class="col-12">
+                    <div class="border-bottom pb-2 mb-2">
+                        <strong class="text-dark">📋 Informasi Peminjam</strong>
+                    </div>
+                    <div class="small">
+                        <div class="mb-1"><strong>Nama:</strong> ${bookerName || '-'}</div>
+                        <div class="mb-1"><strong>No. HP:</strong> ${bookerPhone || '-'}</div>
+                        <div class="mb-1"><strong>Email:</strong> ${bookerEmail || '-'}</div>
+                        <div class="mb-1"><strong>Organisasi:</strong> ${organization || '-'}</div>
+                    </div>
+                </div>
+                <div class="col-12">
+                    <div class="border-bottom pb-2 mb-2">
+                        <strong class="text-dark">🎪 Detail Acara</strong>
+                    </div>
+                    <div class="small">
+                        <div class="mb-1"><strong>Nama Acara:</strong> ${eventName || '-'}</div>
+                        <div class="mb-1"><strong>Deskripsi:</strong> ${eventDesc || '-'}</div>
+                        <div class="mb-1">${dateInfo}</div>
+                    </div>
+                </div>
+            `;
+
+        // Add items if applicable
+        if (!isAtm && "<?= trim($building['name'] ?? '') !== 'Ruang Rapat Sekretariat Daerah Kab. Hulu Sungai Tengah' && $building['category'] !== 'gratis' ? '1' : '0' ?>" === '1') {
+            let hasItems = false;
+            let itemsHTML = `
+                <div class="col-12">
+                    <div class="border-bottom pb-2 mb-2">
+                        <strong class="text-dark">🛠️ Fasilitas Pendukung</strong>
+                    </div>
+                    <div class="small">
+                `;
+                <?php foreach($available_items as $item): ?>
+                    const item<?= $item['id'] ?> = document.querySelector('input[name="items[<?= $item['id'] ?>]"]')?.value;
+                    if (parseInt(item<?= $item['id'] ?>) > 0) {
+                        hasItems = true;
+                        itemsHTML += `<div class="mb-1"><?= htmlspecialchars($item['name']) ?>: <strong>${item<?= $item['id'] ?>} unit</strong> (Rp ${formatNumber(<?= $item['price_per_unit'] ?>)}/unit)</div>`;
+                    }
+                <?php endforeach; ?>
+                itemsHTML += `</div></div>`;
+                if (hasItems) {
+                    summaryHTML += itemsHTML;
+                }
+        }
+
+        if (proposalFile) {
+            summaryHTML += `
+                <div class="col-12">
+                    <div class="border-bottom pb-2 mb-2">
+                        <strong class="text-dark">📄 Dokumen</strong>
+                    </div>
+                    <div class="small"><i class="bi bi-file-earmark-check me-1 text-success"></i>${proposalFile}</div>
+                </div>
+            `;
+        }
+
+        summaryHTML += '</div>';
+        summaryContent.innerHTML = summaryHTML;
+    });
+
+    // Submit form when confirm button is clicked
+    confirmBookingBtn.addEventListener('click', function() {
+        bookingForm.submit();
+    });
+});
+</script>
+<?php endif; ?>
+
 <style>
     .xsmall { font-size: 0.75rem; }
     .bg-primary-subtle { background-color: #e7f1ff; }
     .text-primary-emphasis { color: #052c65; }
+    /* Ensure modal is on top */
+    #bookingSummaryModal { z-index: 99999 !important; }
 
     /* Custom FullCalendar Mint Green Theme */
     #calendar {
