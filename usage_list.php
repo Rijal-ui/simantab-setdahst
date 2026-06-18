@@ -58,9 +58,9 @@ include 'header.php';
         <p class="text-muted">Daftar penggunaan gedung yang telah disetujui</p>
     </div>
 
-    <div class="card shadow-sm border-0 flex-grow-1 d-flex flex-column">
+    <div class="card shadow-sm border-0 flex-grow-1 d-flex flex-column overflow-hidden">
         <div class="card-body p-0 d-flex flex-column">
-            <div class="table-responsive">
+            <div class="table-responsive border-bottom">
                 <table class="table table-hover mb-0">
                     <thead class="table-light">
                         <tr>
@@ -77,35 +77,53 @@ include 'header.php';
                 </table>
             </div>
             
-            <marquee direction="up" scrollamount="3" onmouseover="this.stop();" onmouseout="this.start();" class="flex-grow-1" style="min-height: 200px;">
-                <div class="table-responsive">
-                    <table class="table table-hover mb-0">
-                        <tbody>
-                            <?php if (count($usage_data) > 0): ?>
-                                <?php foreach ($usage_data as $index => $row): ?>
-                                <tr>
-                                    <td class="px-4 py-3" style="width: 50px;"><?= $index + 1 ?></td>
-                                    <td class="px-4 py-3"><?= isset($row['is_routine']) ? 'Setiap Kamis' : getDayNameInIndonesian($row['booking_date']) ?></td>
-                                    <td class="px-4 py-3"><?= isset($row['is_routine']) ? '-' : date('d M Y', strtotime($row['booking_date'])) ?></td>
-                                    <td class="px-4 py-3"><?= date('H:i', strtotime($row['start_time'])) ?> - <?= date('H:i', strtotime($row['end_time'])) ?></td>
-                                    <td class="px-4 py-3"><strong><?= htmlspecialchars($row['building_name']) ?></strong></td>
-                                    <td class="px-4 py-3"><?= htmlspecialchars($row['organization'] ?: '-') ?></td>
-                                    <td class="px-4 py-3"><?= htmlspecialchars($row['booker_name']) ?></td>
-                                    <td class="px-4 py-3">
-                                        <i class="bi bi-telephone text-primary me-1"></i> <?= htmlspecialchars($row['booker_phone']) ?><br>
-                                        <i class="bi bi-envelope text-secondary me-1"></i> <?= htmlspecialchars($row['booker_email']) ?>
-                                    </td>
-                                </tr>
-                                <?php endforeach; ?>
-                            <?php else: ?>
-                                <tr>
-                                    <td colspan="8" class="text-center py-5 text-muted">Belum ada data pemakaian gedung.</td>
-                                </tr>
-                            <?php endif; ?>
-                        </tbody>
-                    </table>
+            <div class="scroll-wrapper overflow-hidden flex-grow-1" style="min-height: 200px;">
+                <div class="scroll-content">
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0">
+                            <tbody>
+                                <?php if (count($usage_data) > 0): ?>
+                                    <?php foreach ($usage_data as $index => $row): ?>
+                                    <tr class="animate-row">
+                                        <td class="px-4 py-3" style="width: 50px;"><?= $index + 1 ?></td>
+                                        <td class="px-4 py-3"><?= isset($row['is_routine']) ? 'Setiap Kamis' : getDayNameInIndonesian($row['booking_date']) ?></td>
+                                        <td class="px-4 py-3"><?= isset($row['is_routine']) ? '-' : date('d M Y', strtotime($row['booking_date'])) ?></td>
+                                        <td class="px-4 py-3"><?= date('H:i', strtotime($row['start_time'])) ?> - <?= date('H:i', strtotime($row['end_time'])) ?></td>
+                                        <td class="px-4 py-3"><strong><?= htmlspecialchars($row['building_name']) ?></strong></td>
+                                        <td class="px-4 py-3"><?= htmlspecialchars($row['organization'] ?: '-') ?></td>
+                                        <td class="px-4 py-3"><?= htmlspecialchars($row['booker_name']) ?></td>
+                                        <td class="px-4 py-3">
+                                            <i class="bi bi-telephone text-primary me-1"></i> <?= htmlspecialchars($row['booker_phone']) ?><br>
+                                            <i class="bi bi-envelope text-secondary me-1"></i> <?= htmlspecialchars($row['booker_email']) ?>
+                                        </td>
+                                    </tr>
+                                    <?php endforeach; ?>
+                                    <!-- Duplicate data for seamless scrolling -->
+                                    <?php foreach ($usage_data as $index => $row): ?>
+                                    <tr class="animate-row">
+                                        <td class="px-4 py-3" style="width: 50px;"><?= $index + 1 ?></td>
+                                        <td class="px-4 py-3"><?= isset($row['is_routine']) ? 'Setiap Kamis' : getDayNameInIndonesian($row['booking_date']) ?></td>
+                                        <td class="px-4 py-3"><?= isset($row['is_routine']) ? '-' : date('d M Y', strtotime($row['booking_date'])) ?></td>
+                                        <td class="px-4 py-3"><?= date('H:i', strtotime($row['start_time'])) ?> - <?= date('H:i', strtotime($row['end_time'])) ?></td>
+                                        <td class="px-4 py-3"><strong><?= htmlspecialchars($row['building_name']) ?></strong></td>
+                                        <td class="px-4 py-3"><?= htmlspecialchars($row['organization'] ?: '-') ?></td>
+                                        <td class="px-4 py-3"><?= htmlspecialchars($row['booker_name']) ?></td>
+                                        <td class="px-4 py-3">
+                                            <i class="bi bi-telephone text-primary me-1"></i> <?= htmlspecialchars($row['booker_phone']) ?><br>
+                                            <i class="bi bi-envelope text-secondary me-1"></i> <?= htmlspecialchars($row['booker_email']) ?>
+                                        </td>
+                                    </tr>
+                                    <?php endforeach; ?>
+                                <?php else: ?>
+                                    <tr>
+                                        <td colspan="8" class="text-center py-5 text-muted">Belum ada data pemakaian gedung.</td>
+                                    </tr>
+                                <?php endif; ?>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
-            </marquee>
+            </div>
         </div>
     </div>
     
@@ -117,9 +135,6 @@ include 'header.php';
 </div>
 
 <style>
-    marquee {
-        background: #fff;
-    }
     .table {
         table-layout: fixed;
         width: 100%;
@@ -128,7 +143,7 @@ include 'header.php';
         vertical-align: middle;
         word-wrap: break-word;
     }
-    /* Menyelaraskan lebar kolom antara header (di luar marquee) dan body (di dalam marquee) */
+    /* Menyelaraskan lebar kolom antara header dan body */
     .table th:nth-child(1), .table td:nth-child(1) { width: 5%; }
     .table th:nth-child(2), .table td:nth-child(2) { width: 10%; }
     .table th:nth-child(3), .table td:nth-child(3) { width: 12%; }
@@ -137,6 +152,38 @@ include 'header.php';
     .table th:nth-child(6), .table td:nth-child(6) { width: 13%; }
     .table th:nth-child(7), .table td:nth-child(7) { width: 12%; }
     .table th:nth-child(8), .table td:nth-child(8) { width: 18%; }
+
+    /* Smooth Scroll Animation */
+    .scroll-wrapper {
+        position: relative;
+        background: #fff;
+    }
+
+    .scroll-content {
+        animation: scrollUp 35s linear infinite;
+    }
+
+    .scroll-wrapper:hover .scroll-content {
+        animation-play-state: paused;
+    }
+
+    @keyframes scrollUp {
+        0% {
+            transform: translateY(0);
+        }
+        100% {
+            transform: translateY(-50%);
+        }
+    }
+
+    /* Animate rows for extra effect */
+    .animate-row {
+        transition: all 0.3s ease;
+    }
+    .animate-row:hover {
+        background-color: #f0fff4 !important;
+        transform: scale(1.01);
+    }
 </style>
 
 <?php include 'footer.php'; ?>
