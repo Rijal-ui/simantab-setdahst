@@ -361,76 +361,89 @@ include 'header.php';
 
                 <script>
                 document.addEventListener('DOMContentLoaded', function() {
-                    const buildingName = "<?= htmlspecialchars(trim($building['name'] ?? '')) ?>";
+                const buildingName = "<?= htmlspecialchars(trim($building['name'] ?? '')) ?>";
+                const bName = buildingName.toLowerCase();
 
-                    var cb = document.getElementById('is_multi_day');
-                    var single = document.getElementById('single-day-fields');
-                    var multi = document.getElementById('multi-day-fields');
-                    function sync() {
-                        if (cb.checked) {
-                            multi.classList.remove('d-none');
-                            single.classList.add('d-none');
-                            single.querySelectorAll('input').forEach(i => i.required = false);
-                            multi.querySelectorAll('input').forEach(i => i.required = true);
-                        } else {
-                            multi.classList.add('d-none');
-                            single.classList.remove('d-none');
-                            single.querySelectorAll('input').forEach(i => i.required = true);
-                            multi.querySelectorAll('input').forEach(i => i.required = false);
-                        }
+                var cb = document.getElementById('is_multi_day');
+                var single = document.getElementById('single-day-fields');
+                var multi = document.getElementById('multi-day-fields');
+                
+                function sync() {
+                    if (cb.checked) {
+                        multi.classList.remove('d-none');
+                        single.classList.add('d-none');
+                        single.querySelectorAll('input').forEach(i => i.required = false);
+                        multi.querySelectorAll('input').forEach(i => i.required = true);
+                    } else {
+                        multi.classList.add('d-none');
+                        single.classList.remove('d-none');
+                        single.querySelectorAll('input').forEach(i => i.required = true);
+                        multi.querySelectorAll('input').forEach(i => i.required = false);
                     }
-                    cb.addEventListener('change', sync);
-                    sync();
+                }
+                if(cb) cb.addEventListener('change', sync);
+                sync();
 
-                    // Initialize Flatpickr with conditional restrictions
-                    let flatpickrConfig = {
-                        enableTime: true,
-                        noCalendar: true,
-                        dateFormat: "H:i",
-                        time_24hr: true,
-                        locale: "id",
-                        allowInput: true
-                    };
+                // 1. Hitung Batasan H-3 (Tanggal minimal yang boleh dipilih)
+                const minBookingDate = new Date();
+                minBookingDate.setDate(minBookingDate.getDate() + 3);
 
-                    const startTimeInput = document.getElementById('start_time');
-                    const endTimeInput = document.getElementById('end_time');
-                    const bName = buildingName.toLowerCase();
+                // 2. Konfigurasi dasar untuk pemilihan TANGGAL
+                let datePickerConfig = {
+                    minDate: minBookingDate, // Mengaktifkan batasan H-3 secara mutlak
+                    locale: "id",
+                    dateFormat: "Y-m-d",
+                    disable: [] // Nanti diisi secara kondisional
+                };
 
-                    if (bName.includes('siang hari')) {
-                        flatpickrConfig.minTime = "07:00";
-                        flatpickrConfig.maxTime = "17:00";
-                        
-                        // Allow all dates
-                        flatpickr(".form-control[type='date']", {
-                            disable: [
-                                function(date) {
-                                    return (date.getDay() === 4); // 4 = Thursday
-                                }
-                            ],
-                            locale: "id",
-                            dateFormat: "Y-m-d"
-                        });
+                // 3. Konfigurasi dasar untuk pemilihan JAM (Timepicker)
+                let flatpickrConfig = {
+                    enableTime: true,
+                    noCalendar: true,
+                    dateFormat: "H:i",
+                    time_24hr: true,
+                    locale: "id",
+                    allowInput: true
+                };
 
-                        startTimeInput.value = "";
-                        endTimeInput.value = "";
+                const startTimeInput = document.getElementById('start_time');
+                const endTimeInput = document.getElementById('end_time');
+
+                // 4. Kondisi Spesifik Berdasarkan Nama Gedung
+                if (bName.includes('siang hari')) {
+                    flatpickrConfig.minTime = "07:00";
+                    flatpickrConfig.maxTime = "17:00";
+                    
+                    if (startTimeInput && endTimeInput) {
                         startTimeInput.placeholder = "07:00";
                         endTimeInput.placeholder = "17:00";
-                    } else if (bName.includes('malam hari')) {
-                        flatpickrConfig.minTime = "18:00";
-                        flatpickrConfig.maxTime = "06:00";
-                        startTimeInput.value = "";
-                        endTimeInput.value = "";
+                    }
+
+                    // KHUSUS SIANG HARI: Tambahkan fungsi pemblokiran hari KAMIS (4)
+                    datePickerConfig.disable.push(function(date) {
+                        return date.getDay() === 4; // 4 melambangkan hari Kamis
+                    });
+
+                } else if (bName.includes('malam hari')) {
+                    flatpickrConfig.minTime = "18:00";
+                    flatpickrConfig.maxTime = "06:00";
+                    
+                    if (startTimeInput && endTimeInput) {
                         startTimeInput.placeholder = "18:00";
                         endTimeInput.placeholder = "06:00";
-                        flatpickrConfig.defaultDate = "18:00";
-                    } else {
+                    }
+                    flatpickrConfig.defaultDate = "18:00";
+                } else {
+                    if (startTimeInput && endTimeInput) {
                         startTimeInput.placeholder = "--:--";
                         endTimeInput.placeholder = "--:--";
                     }
+                }
 
-                    // Force clear and re-init
-                    flatpickr(".timepicker", flatpickrConfig);
-                });
+                // 5. Jalankan Flatpickr secara global dengan konfigurasi yang matang
+                flatpickr(".form-control[type='date']", datePickerConfig);
+                flatpickr(".timepicker", flatpickrConfig);
+            });
                 </script>
             <?php endif; ?>
 
