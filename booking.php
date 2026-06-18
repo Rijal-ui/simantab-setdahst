@@ -388,12 +388,13 @@ include 'header.php';
                 const minBookingDate = new Date();
                 minBookingDate.setDate(minBookingDate.getDate() + 3);
 
-                // 2. Konfigurasi dasar untuk pemilihan TANGGAL
+                // 2. Konfigurasi dasar untuk pemilihan TANGGAL (Berlaku untuk semua gedung)
                 let datePickerConfig = {
-                    minDate: minBookingDate, // Mengaktifkan batasan H-3 secara mutlak
+                    minDate: minBookingDate, // Mengaktifkan batasan H-3 secara mutlak di semua gedung
                     locale: "id",
                     dateFormat: "Y-m-d",
-                    disable: [] // Nanti diisi secara kondisional
+                    disableMobile: true,     // Mengunci performa kalender agar valid di iPhone/Safari
+                    disable: []              // Tempat menampung filter hari jika diperlukan
                 };
 
                 // 3. Konfigurasi dasar untuk pemilihan JAM (Timepicker)
@@ -403,7 +404,8 @@ include 'header.php';
                     dateFormat: "H:i",
                     time_24hr: true,
                     locale: "id",
-                    allowInput: true
+                    allowInput: true,
+                    disableMobile: true      // Mengamankan penampang jam di iOS/Android
                 };
 
                 const startTimeInput = document.getElementById('start_time');
@@ -419,7 +421,7 @@ include 'header.php';
                         endTimeInput.placeholder = "17:00";
                     }
 
-                    // KHUSUS SIANG HARI: Tambahkan fungsi pemblokiran hari KAMIS (4)
+                    // 🔥 HANYA UNTUK SIANG HARI: Filter hari Kamis diaktifkan
                     datePickerConfig.disable.push(function(date) {
                         return date.getDay() === 4; // 4 melambangkan hari Kamis
                     });
@@ -434,13 +436,15 @@ include 'header.php';
                     }
                     flatpickrConfig.defaultDate = "18:00";
                 } else {
+                    // Untuk gedung/ruangan lainnya, bersihkan batasan placeholder jam
                     if (startTimeInput && endTimeInput) {
                         startTimeInput.placeholder = "--:--";
                         endTimeInput.placeholder = "--:--";
                     }
+                    // Filter hari kamis otomatis kosong ([]), sehingga hari kamis tetap bisa dipilih bebas.
                 }
 
-                // 5. Jalankan Flatpickr secara global dengan konfigurasi yang matang
+                // 5. Jalankan Flatpickr secara global ke semua input date dan timepicker
                 flatpickr(".form-control[type='date']", datePickerConfig);
                 flatpickr(".timepicker", flatpickrConfig);
             });
