@@ -52,26 +52,27 @@ function getDayNameInIndonesian($date) {
 include 'header.php';
 ?>
 
-<div class="container-fluid px-4 py-5 d-flex flex-column" style="height: calc(100vh - 120px);">
+<div class="container-fluid px-2 px-md-4 py-5 d-flex flex-column" style="height: calc(100vh - 120px);">
     <div class="text-center mb-4">
-        <h2 class="fw-bold">Data Jadwal Pemakaian Gedung</h2>
-        <p class="text-muted">Daftar penggunaan gedung yang telah disetujui</p>
+        <h2 class="fw-bold h4">Data Jadwal Pemakaian Gedung</h2>
+        <p class="text-muted small">Daftar penggunaan gedung yang telah disetujui</p>
     </div>
 
     <div class="card shadow-sm border-0 flex-grow-1 d-flex flex-column overflow-hidden">
         <div class="card-body p-0 d-flex flex-column">
-            <div class="table-responsive border-bottom">
+            <!-- Desktop Header -->
+            <div class="table-responsive border-bottom d-none d-md-block">
                 <table class="table table-hover mb-0">
                     <thead class="table-light">
                         <tr>
-                            <th class="px-4 py-3" style="width: 50px;">No.</th>
-                            <th class="px-4 py-3">Hari</th>
-                            <th class="px-4 py-3">Tanggal</th>
-                            <th class="px-4 py-3">Waktu</th>
-                            <th class="px-4 py-3">Gedung</th>
-                            <th class="px-4 py-3">Instansi/Organisasi</th>
-                            <th class="px-4 py-3">Atas Nama</th>
-                            <th class="px-4 py-3">Kontak</th>
+                            <th class="px-3 py-3" style="width: 40px;">No.</th>
+                            <th class="px-3 py-3">Hari</th>
+                            <th class="px-3 py-3">Tanggal</th>
+                            <th class="px-3 py-3">Waktu</th>
+                            <th class="px-3 py-3">Gedung</th>
+                            <th class="px-3 py-3">Instansi/Organisasi</th>
+                            <th class="px-3 py-3">Atas Nama</th>
+                            <th class="px-3 py-3">Kontak</th>
                         </tr>
                     </thead>
                 </table>
@@ -79,20 +80,21 @@ include 'header.php';
             
             <div class="scroll-wrapper overflow-hidden flex-grow-1" style="min-height: 200px;">
                 <div class="scroll-content">
-                    <div class="table-responsive">
+                    <!-- Desktop View -->
+                    <div class="table-responsive d-none d-md-block">
                         <table class="table table-hover mb-0">
                             <tbody>
                                 <?php if (count($usage_data) > 0): ?>
                                     <?php foreach ($usage_data as $index => $row): ?>
                                     <tr class="animate-row">
-                                        <td class="px-4 py-3" style="width: 50px;"><?= $index + 1 ?></td>
-                                        <td class="px-4 py-3"><?= isset($row['is_routine']) ? 'Setiap Kamis' : getDayNameInIndonesian($row['booking_date']) ?></td>
-                                        <td class="px-4 py-3"><?= isset($row['is_routine']) ? '-' : date('d M Y', strtotime($row['booking_date'])) ?></td>
-                                        <td class="px-4 py-3"><?= date('H:i', strtotime($row['start_time'])) ?> - <?= date('H:i', strtotime($row['end_time'])) ?></td>
-                                        <td class="px-4 py-3"><strong><?= htmlspecialchars($row['building_name']) ?></strong></td>
-                                        <td class="px-4 py-3"><?= htmlspecialchars($row['organization'] ?: '-') ?></td>
-                                        <td class="px-4 py-3"><?= htmlspecialchars($row['booker_name']) ?></td>
-                                        <td class="px-4 py-3">
+                                        <td class="px-3 py-3" style="width: 40px;"><?= $index + 1 ?></td>
+                                        <td class="px-3 py-3"><?= isset($row['is_routine']) ? 'Setiap Kamis' : getDayNameInIndonesian($row['booking_date']) ?></td>
+                                        <td class="px-3 py-3"><?= isset($row['is_routine']) ? '-' : date('d M Y', strtotime($row['booking_date'])) ?></td>
+                                        <td class="px-3 py-3"><?= date('H:i', strtotime($row['start_time'])) ?> - <?= date('H:i', strtotime($row['end_time'])) ?></td>
+                                        <td class="px-3 py-3"><strong class="small"><?= htmlspecialchars($row['building_name']) ?></strong></td>
+                                        <td class="px-3 py-3"><?= htmlspecialchars($row['organization'] ?: '-') ?></td>
+                                        <td class="px-3 py-3"><?= htmlspecialchars($row['booker_name']) ?></td>
+                                        <td class="px-3 py-3">
                                             <i class="bi bi-telephone text-primary me-1"></i> <?= htmlspecialchars($row['booker_phone']) ?><br>
                                             <i class="bi bi-envelope text-secondary me-1"></i> <?= htmlspecialchars($row['booker_email']) ?>
                                         </td>
@@ -101,14 +103,14 @@ include 'header.php';
                                     <!-- Duplicate data for seamless scrolling -->
                                     <?php foreach ($usage_data as $index => $row): ?>
                                     <tr class="animate-row">
-                                        <td class="px-4 py-3" style="width: 50px;"><?= $index + 1 ?></td>
-                                        <td class="px-4 py-3"><?= isset($row['is_routine']) ? 'Setiap Kamis' : getDayNameInIndonesian($row['booking_date']) ?></td>
-                                        <td class="px-4 py-3"><?= isset($row['is_routine']) ? '-' : date('d M Y', strtotime($row['booking_date'])) ?></td>
-                                        <td class="px-4 py-3"><?= date('H:i', strtotime($row['start_time'])) ?> - <?= date('H:i', strtotime($row['end_time'])) ?></td>
-                                        <td class="px-4 py-3"><strong><?= htmlspecialchars($row['building_name']) ?></strong></td>
-                                        <td class="px-4 py-3"><?= htmlspecialchars($row['organization'] ?: '-') ?></td>
-                                        <td class="px-4 py-3"><?= htmlspecialchars($row['booker_name']) ?></td>
-                                        <td class="px-4 py-3">
+                                        <td class="px-3 py-3" style="width: 40px;"><?= $index + 1 ?></td>
+                                        <td class="px-3 py-3"><?= isset($row['is_routine']) ? 'Setiap Kamis' : getDayNameInIndonesian($row['booking_date']) ?></td>
+                                        <td class="px-3 py-3"><?= isset($row['is_routine']) ? '-' : date('d M Y', strtotime($row['booking_date'])) ?></td>
+                                        <td class="px-3 py-3"><?= date('H:i', strtotime($row['start_time'])) ?> - <?= date('H:i', strtotime($row['end_time'])) ?></td>
+                                        <td class="px-3 py-3"><strong class="small"><?= htmlspecialchars($row['building_name']) ?></strong></td>
+                                        <td class="px-3 py-3"><?= htmlspecialchars($row['organization'] ?: '-') ?></td>
+                                        <td class="px-3 py-3"><?= htmlspecialchars($row['booker_name']) ?></td>
+                                        <td class="px-3 py-3">
                                             <i class="bi bi-telephone text-primary me-1"></i> <?= htmlspecialchars($row['booker_phone']) ?><br>
                                             <i class="bi bi-envelope text-secondary me-1"></i> <?= htmlspecialchars($row['booker_email']) ?>
                                         </td>
@@ -121,6 +123,60 @@ include 'header.php';
                                 <?php endif; ?>
                             </tbody>
                         </table>
+                    </div>
+                    
+                    <!-- Mobile View (Cards) -->
+                    <div class="d-md-none p-2">
+                        <?php if (count($usage_data) > 0): ?>
+                            <?php foreach ($usage_data as $index => $row): ?>
+                            <div class="card mb-3 shadow-sm border-0 animate-row">
+                                <div class="card-body p-3">
+                                    <div class="d-flex justify-content-between align-items-start mb-2">
+                                        <span class="badge bg-primary"><?= $index + 1 ?></span>
+                                        <small class="text-muted"><?= isset($row['is_routine']) ? 'Setiap Kamis' : getDayNameInIndonesian($row['booking_date']) ?></small>
+                                    </div>
+                                    <?php if (!isset($row['is_routine'])): ?>
+                                    <p class="mb-1 small"><strong>Tanggal:</strong> <?= date('d M Y', strtotime($row['booking_date'])) ?></p>
+                                    <?php endif; ?>
+                                    <p class="mb-1 small"><strong>Waktu:</strong> <?= date('H:i', strtotime($row['start_time'])) ?> - <?= date('H:i', strtotime($row['end_time'])) ?></p>
+                                    <p class="mb-1 small"><strong>Gedung:</strong> <?= htmlspecialchars($row['building_name']) ?></p>
+                                    <p class="mb-1 small"><strong>Instansi:</strong> <?= htmlspecialchars($row['organization'] ?: '-') ?></p>
+                                    <p class="mb-1 small"><strong>Atas Nama:</strong> <?= htmlspecialchars($row['booker_name']) ?></p>
+                                    <div class="small text-muted">
+                                        <i class="bi bi-telephone text-primary me-1"></i> <?= htmlspecialchars($row['booker_phone']) ?><br>
+                                        <i class="bi bi-envelope text-secondary me-1"></i> <?= htmlspecialchars($row['booker_email']) ?>
+                                    </div>
+                                </div>
+                            </div>
+                            <?php endforeach; ?>
+                            <!-- Duplicate data for seamless scrolling -->
+                            <?php foreach ($usage_data as $index => $row): ?>
+                            <div class="card mb-3 shadow-sm border-0 animate-row">
+                                <div class="card-body p-3">
+                                    <div class="d-flex justify-content-between align-items-start mb-2">
+                                        <span class="badge bg-primary"><?= $index + 1 ?></span>
+                                        <small class="text-muted"><?= isset($row['is_routine']) ? 'Setiap Kamis' : getDayNameInIndonesian($row['booking_date']) ?></small>
+                                    </div>
+                                    <?php if (!isset($row['is_routine'])): ?>
+                                    <p class="mb-1 small"><strong>Tanggal:</strong> <?= date('d M Y', strtotime($row['booking_date'])) ?></p>
+                                    <?php endif; ?>
+                                    <p class="mb-1 small"><strong>Waktu:</strong> <?= date('H:i', strtotime($row['start_time'])) ?> - <?= date('H:i', strtotime($row['end_time'])) ?></p>
+                                    <p class="mb-1 small"><strong>Gedung:</strong> <?= htmlspecialchars($row['building_name']) ?></p>
+                                    <p class="mb-1 small"><strong>Instansi:</strong> <?= htmlspecialchars($row['organization'] ?: '-') ?></p>
+                                    <p class="mb-1 small"><strong>Atas Nama:</strong> <?= htmlspecialchars($row['booker_name']) ?></p>
+                                    <div class="small text-muted">
+                                        <i class="bi bi-telephone text-primary me-1"></i> <?= htmlspecialchars($row['booker_phone']) ?><br>
+                                        <i class="bi bi-envelope text-secondary me-1"></i> <?= htmlspecialchars($row['booker_email']) ?>
+                                    </div>
+                                </div>
+                            </div>
+                            <?php endforeach; ?>
+                        <?php else: ?>
+                            <div class="text-center py-5 text-muted">
+                                <i class="bi bi-calendar-x fs-1 mb-2 d-block"></i>
+                                Belum ada data pemakaian gedung.
+                            </div>
+                        <?php endif; ?>
                     </div>
                 </div>
             </div>
@@ -144,14 +200,14 @@ include 'header.php';
         word-wrap: break-word;
     }
     /* Menyelaraskan lebar kolom antara header dan body */
-    .table th:nth-child(1), .table td:nth-child(1) { width: 5%; }
+    .table th:nth-child(1), .table td:nth-child(1) { width: 40px; }
     .table th:nth-child(2), .table td:nth-child(2) { width: 10%; }
     .table th:nth-child(3), .table td:nth-child(3) { width: 12%; }
     .table th:nth-child(4), .table td:nth-child(4) { width: 12%; }
-    .table th:nth-child(5), .table td:nth-child(5) { width: 18%; }
+    .table th:nth-child(5), .table td:nth-child(5) { width: 20%; }
     .table th:nth-child(6), .table td:nth-child(6) { width: 13%; }
     .table th:nth-child(7), .table td:nth-child(7) { width: 12%; }
-    .table th:nth-child(8), .table td:nth-child(8) { width: 18%; }
+    .table th:nth-child(8), .table td:nth-child(8) { width: 16%; }
 
     /* Smooth Scroll Animation */
     .scroll-wrapper {
@@ -183,6 +239,13 @@ include 'header.php';
     .animate-row:hover {
         background-color: #f0fff4 !important;
         transform: scale(1.01);
+    }
+
+    /* Make container more responsive */
+    @media (max-width: 768px) {
+        .container-fluid {
+            padding: 0.5rem;
+        }
     }
 </style>
 
