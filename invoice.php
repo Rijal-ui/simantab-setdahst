@@ -225,7 +225,7 @@ if ($invoice['booking_id']) {
     <div class="divider"></div>
 
     <div class="footer">
-        Silakan lakukan pembayaran ke no rekening 1234 123 1133 533 a.n setda<br>
+        Silakan lakukan pembayaran ke no rekening BANK KALSEL 3208129286 a.n SEWA TANAH BANGUNAN PERUMAHAN/GEDUNG TEMPAT TINGGAL<br>
         Konfirmasi ke nomor 0853-4604-2831<br>
         Terima kasih atas kepercayaan Anda
     </div>

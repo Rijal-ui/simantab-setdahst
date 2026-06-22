@@ -74,7 +74,10 @@ include 'header.php';
                 <h5 class="fw-bold mb-0">Grafik Penggunaan Gedung</h5>
             </div>
             <div class="card-body p-4">
-                <canvas id="buildingChart" style="max-height: 300px;"></canvas>
+                <!-- Container with responsive dimensions -->
+                <div style="height: 350px; width: 100%;">
+                    <canvas id="buildingChart"></canvas>
+                </div>
             </div>
         </div>
     </div>
@@ -84,7 +87,10 @@ include 'header.php';
                 <h5 class="fw-bold mb-0">Grafik Pendapatan</h5>
             </div>
             <div class="card-body p-4 d-flex align-items-center justify-content-center">
-                <canvas id="categoryChart" style="max-height: 300px;"></canvas>
+                <!-- Container with responsive dimensions -->
+                <div style="height: 300px; width: 100%;">
+                    <canvas id="categoryChart"></canvas>
+                </div>
             </div>
         </div>
     </div>
@@ -244,10 +250,15 @@ $bookings = $stmt->fetchAll(PDO::FETCH_ASSOC);
 document.addEventListener('DOMContentLoaded', function() {
     // Register the datalabels plugin to all charts
     Chart.register(ChartDataLabels);
+    
+    // Function to check if mobile view
+    function isMobileView() {
+        return window.innerWidth < 768;
+    }
 
     // Building Usage Chart
     const ctxBuilding = document.getElementById('buildingChart').getContext('2d');
-    new Chart(ctxBuilding, {
+    const buildingChart = new Chart(ctxBuilding, {
         type: 'bar',
         data: {
             labels: <?= json_encode($building_labels) ?>,
@@ -268,7 +279,8 @@ document.addEventListener('DOMContentLoaded', function() {
                     align: 'top',
                     formatter: Math.round,
                     font: {
-                        weight: 'bold'
+                        weight: 'bold',
+                        size: isMobileView() ? 10 : 12
                     },
                     color: '#333'
                 }
@@ -276,8 +288,22 @@ document.addEventListener('DOMContentLoaded', function() {
             scales: {
                 y: {
                     beginAtZero: true,
-                    ticks: { stepSize: 1 },
+                    ticks: { 
+                        stepSize: 1,
+                        font: {
+                            size: isMobileView() ? 10 : 12
+                        }
+                    },
                     grace: '10%' // Add space for labels at the top
+                },
+                x: {
+                    ticks: {
+                        maxRotation: isMobileView() ? 90 : 45,
+                        minRotation: isMobileView() ? 90 : 0,
+                        font: {
+                            size: isMobileView() ? 10 : 12
+                        }
+                    }
                 }
             }
         }
@@ -288,7 +314,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const categoryData = [<?= $category_stats['gratis'] ?>, <?= $category_stats['berbayar'] ?>];
     const totalUsage = categoryData.reduce((a, b) => a + b, 0);
     
-    new Chart(ctxCategory, {
+    const categoryChart = new Chart(ctxCategory, {
         type: 'doughnut',
         data: {
             labels: ['Gratis', 'Berbayar'],
@@ -303,13 +329,19 @@ document.addEventListener('DOMContentLoaded', function() {
             maintainAspectRatio: false,
             plugins: {
                 legend: {
-                    position: 'bottom'
+                    position: 'bottom',
+                    labels: {
+                        font: {
+                            size: isMobileView() ? 11 : 14
+                        },
+                        padding: isMobileView() ? 15 : 20
+                    }
                 },
                 datalabels: {
                     color: '#fff',
                     font: {
                         weight: 'bold',
-                        size: 12
+                        size: isMobileView() ? 10 : 12
                     },
                     formatter: (value, ctx) => {
                         let sum = 0;
@@ -347,6 +379,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 ctx.save();
             }
         }]
+    });
+    
+    // Re-update charts on window resize
+    window.addEventListener('resize', function() {
+        buildingChart.update();
+        categoryChart.update();
     });
 });
 </script>

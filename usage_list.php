@@ -9,12 +9,12 @@ $query = "SELECT b.*, bl.name as building_name
 $stmt = $pdo->query($query);
 $usage_data = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Add single routine event for "Zumba Isteri Bupati"
+// Add single routine event for "Acara Rutin Senam Bersama Ketua TP PKK Kab HST"
 $routine_events = [
     [
         'booking_date' => '2000-01-01', // Use a past date to keep it at the top after sorting (ASC)
-        'start_time' => '08:00:00',
-        'end_time' => '10:00:00',
+        'start_time' => '07:00:00',
+        'end_time' => '17:00:00',
         'building_name' => 'Gedung Balai Rakyat (Siang Hari)',
         'organization' => 'Ketua TP PKK Kabupaten Hulu Sungai Tengah',
         'booker_name' => 'Acara Rutin',
