@@ -9,7 +9,7 @@ if ($invoice_id) {
         SELECT 
             i.id as invoice_id, i.amount, i.status as invoice_status, i.created_at as invoice_date,
             b.id as booking_id, b.event_name, b.booking_date, b.start_time, b.end_time,
-            bu.name as building_name, bu.description,
+            bu.name as building_name, bu.description, bu.rental_type,
             bk.booker_name, bk.booker_email, bk.organization
         FROM invoices i
         JOIN bookings b ON i.booking_id = b.id
@@ -190,7 +190,14 @@ if ($invoice['booking_id']) {
                 <span>Rp <?= number_format($building_cost, 0, ',', '.') ?></span>
             </div>
             <div class="item-sub">
-                <?= date('d M Y', strtotime($invoice['booking_date'])) ?> | <?= date('H:i', strtotime($invoice['start_time'])) ?> WITA s.d <?= date('H:i', strtotime($invoice['end_time'])) ?> WITA
+                <?php 
+                $rental_label = [
+                    'per_hari' => 'Per Hari',
+                    'per_bulan' => 'Per Bulan',
+                    'per_tahun' => 'Per Tahun'
+                ];
+                ?>
+                Tipe Sewa: <?= $rental_label[$invoice['rental_type']] ?> | <?= date('d M Y', strtotime($invoice['booking_date'])) ?>
             </div>
         </div>
         <?php endif; ?>

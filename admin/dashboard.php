@@ -95,16 +95,13 @@ foreach ($all_bookings as $booking) {
 include 'header.php';
 ?>
 
-<div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-4">
-    <h1 class="h2 fw-bold">Dashboard</h1>
-    <form method="GET" class="d-flex align-items-center gap-2">
-        <div class="input-group">
+<div class="d-flex flex-wrap justify-content-between align-items-center pt-3 pb-2 mb-4 gap-3">
+    <h1 class="h2 fw-bold mb-0">Dashboard</h1>
+    <form method="GET" class="d-flex flex-1 align-items-center gap-2" id="searchForm">
+        <div class="input-group flex-1">
             <span class="input-group-text bg-light border-0"><i class="bi bi-search"></i></span>
-            <input type="text" name="search" class="form-control border-0 bg-light" placeholder="Pencarian" value="<?= htmlspecialchars($search_query) ?>">
+            <input type="text" name="search" id="searchInput" class="form-control border-0 bg-light" placeholder="Cari nama gedung" value="<?= htmlspecialchars($search_query) ?>">
         </div>
-        <?php if ($search_query): ?>
-            <a href="dashboard.php" class="btn btn-outline-secondary">Reset</a>
-        <?php endif; ?>
     </form>
 </div>
 
@@ -324,6 +321,381 @@ include 'header.php';
     .bg-secondary-subtle { background-color: #f3f4f6; }
     .text-secondary-emphasis { color: #374151; }
 </style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const searchInput = document.getElementById('searchInput');
+    const tableBody = document.querySelector('tbody');
+    const searchForm = document.getElementById('searchForm');
+    let debounceTimer;
+
+    // Initialize event listeners
+    function initializeEventListeners() {
+        // Re-initialize delete triggers
+        document.querySelectorAll('.delete-trigger').forEach(el => {
+            el.addEventListener('click', function(e) {
+                e.preventDefault();
+                const url = this.getAttribute('href');
+                const message = this.getAttribute('data-message') || 'Apakah Anda yakin ingin menghapus data ini?';
+                openModal(message, { type: 'navigate', url });
+            });
+        });
+
+        // Re-initialize payment confirmation triggers
+        document.querySelectorAll('.btn-confirm').forEach(el => {
+            el.addEventListener('click', function(e) {
+                e.preventDefault();
+                const id = this.getAttribute('data-id');
+                openModal('Apakah Anda yakin ingin mengonfirmasi pembayaran untuk invoice ini?', { 
+                    type: 'submit', 
+                    action: 'confirm_payment.php', 
+                    method: 'post', 
+                    fields: { invoice_id: id } 
+                });
+            });
+        });
+
+        // Re-initialize event details triggers
+        document.querySelectorAll('.event-details-trigger').forEach(el => {
+            el.addEventListener('click', function(e) {
+                e.preventDefault();
+                const eventName = this.getAttribute('data-eventname');
+                const eventDesc = this.getAttribute('data-eventdesc');
+                const bookerName = this.getAttribute('data-bookername');
+                const bookerPhone = this.getAttribute('data-bookerphone');
+                const bookerEmail = this.getAttribute('data-bookeremail');
+                const organization = this.getAttribute('data-organization');
+                const proposal = this.getAttribute('data-proposal');
+                
+                const eventDetailModal = new bootstrap.Modal(document.getElementById('eventDetailModal'));
+                document.getElementById('eventDetailTitle').textContent = eventName;
+                document.getElementById('eventDetailName').textContent = bookerName;
+                document.getElementById('eventDetailPhone').textContent = bookerPhone;
+                document.getElementById('eventDetailEmail').textContent = bookerEmail;
+                document.getElementById('eventDetailOrganization').textContent = organization || '-';
+                document.getElementById('eventDetailDesc').textContent = eventDesc || '-';
+                
+                const proposalLink = document.getElementById('eventDetailProposal');
+                if (proposal) {
+                    proposalLink.href = proposal;
+                    proposalLink.style.display = 'block';
+                } else {
+                    proposalLink.style.display = 'none';
+                }
+                
+                eventDetailModal.show();
+            });
+        });
+    }
+
+    // Function to render bookings
+    async function renderBookings(bookings, searchQuery) {
+        if (bookings.length === 0) {
+            tableBody.innerHTML = `
+                <tr>
+                    <td colspan="6" class="px-4 py-5 text-center">
+                        <div class="text-muted">
+                            <i class="bi bi-search fs-1 mb-3 d-block"></i>
+                            ${searchQuery ? 
+                                `<p class="fw-medium">Tidak ada hasil pencarian untuk "${escapeHtml(searchQuery)}"</p>` :
+                                '<p class="fw-medium">Belum ada data booking</p>'
+                            }
+                        </div>
+                    </td>
+                </tr>
+            `;
+            initializeEventListeners();
+            return;
+        }
+
+        let html = '';
+        for (const group of bookings) {
+            const booking = group.main_booking;
+            const dates = group.dates;
+            const isMultiDay = dates.length > 1;
+            
+            let dateDisplay;
+            if (isMultiDay) {
+                const startDate = dates[0];
+                const endDate = dates[dates.length - 1];
+                const startMonthYear = new Date(startDate).toLocaleDateString('id-ID', { month: 'short', year: 'numeric' });
+                const endMonthYear = new Date(endDate).toLocaleDateString('id-ID', { month: 'short', year: 'numeric' });
+                let dateRange;
+                if (startMonthYear === endMonthYear) {
+                    dateRange = new Date(startDate).getDate() + '-' + new Date(endDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+                } else {
+                    dateRange = new Date(startDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }) + ' - ' + new Date(endDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
+                }
+                dateDisplay = `
+                    <div class="fw-bold">${dateRange}</div>
+                    <div class="text-muted small">Beberapa hari (${dates.length} hari)</div>
+                `;
+            } else {
+                const bookingDate = new Date(booking.booking_date);
+                const startTime = booking.start_time.slice(0, 5);
+                const endTime = booking.end_time.slice(0, 5);
+                dateDisplay = `
+                    <div class="fw-bold">${bookingDate.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}</div>
+                    <div class="text-muted small">${startTime} WITA s.d ${endTime} WITA</div>
+                `;
+            }
+
+            const buildingDisplay = `
+                <div class="d-flex align-items-center">
+                    ${booking.image_url ? 
+                        `<img src="../${escapeHtml(booking.image_url)}" alt="${escapeHtml(booking.building_name)}" class="rounded-2 me-3 object-fit-cover" style="width: 45px; height: 45px;">` :
+                        `<div class="rounded-2 bg-light d-flex align-items-center justify-content-center text-muted me-3" style="width: 45px; height: 45px;"><i class="bi bi-building"></i></div>`
+                    }
+                    <span class="fw-medium">${escapeHtml(booking.building_name)}</span>
+                </div>
+            `;
+
+            const bookerDisplay = `
+                <div class="fw-bold small">${escapeHtml(booking.booker_name)}</div>
+                <div class="text-muted xsmall">${escapeHtml(booking.booker_email)}</div>
+                <div class="text-muted xsmall">${escapeHtml(booking.booker_phone)}</div>
+                ${booking.organization ? `<div class="badge bg-light text-dark fw-normal mt-1 xsmall border">${escapeHtml(booking.organization)}</div>` : ''}
+            `;
+
+            const eventDisplay = `
+                <div class="fw-bold small mb-1">
+                    <a href="#" class="text-decoration-none text-dark hover-primary event-details-trigger"
+                       data-eventname="${escapeHtml(booking.event_name)}"
+                       data-eventdesc="${escapeHtml(booking.event_description)}"
+                       data-bookername="${escapeHtml(booking.booker_name)}"
+                       data-bookerphone="${escapeHtml(booking.booker_phone)}"
+                       data-bookeremail="${escapeHtml(booking.booker_email)}"
+                       data-organization="${escapeHtml(booking.organization)}"
+                       data-proposal="${booking.proposal_file ? '../uploads/proposals/' + escapeHtml(booking.proposal_file) : ''}">
+                        ${escapeHtml(booking.event_name)}
+                    </a>
+                </div>
+                ${booking.proposal_file ? 
+                    `<a href="../uploads/proposals/${escapeHtml(booking.proposal_file)}" target="_blank" class="xsmall text-primary text-decoration-none d-inline-flex align-items-center gap-1">
+                        <i class="bi bi-file-earmark-pdf"></i> Lihat Proposal
+                    </a>` : ''
+                }
+            `;
+
+            const statusColors = {
+                'pending': 'bg-warning-subtle text-warning-emphasis',
+                'approved': 'bg-success-subtle text-success-emphasis',
+                'rejected': 'bg-danger-subtle text-danger-emphasis',
+                'cancelled': 'bg-secondary-subtle text-secondary-emphasis'
+            };
+            const statusClass = statusColors[booking.status] || 'bg-light text-dark';
+            let invoiceHTML = '';
+            
+            // Fetch invoice data
+            let invoice = null;
+            for (const bid of group.booking_ids) {
+                try {
+                    const invResponse = await fetch(`api_invoice.php?id=${bid}`, { headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                    const invData = await invResponse.json();
+                    if (invData.invoice) {
+                        invoice = invData.invoice;
+                        break;
+                    }
+                } catch (e) {
+                    console.error('Invoice fetch error:', e);
+                }
+            }
+
+            if (invoice) {
+                const invColors = {
+                    'unpaid': 'text-warning',
+                    'paid': 'text-success',
+                    'cancelled': 'text-danger'
+                };
+                const invIcon = {
+                    'unpaid': 'bi-clock-history',
+                    'paid': 'bi-check-circle',
+                    'cancelled': 'bi-x-circle'
+                };
+                const color = invColors[invoice.status] || 'text-muted';
+                const icon = invIcon[invoice.status] || 'bi-receipt';
+                
+                invoiceHTML = `
+                    <div class="mt-2">
+                        <a href="../invoice.php?id=${invoice.id}" target="_blank" class="text-decoration-none ${color} xsmall fw-bold">
+                            <i class="bi ${icon} me-1"></i> Invoice: ${capitalizeFirst(invoice.status)}
+                        </a>
+                        ${invoice.status === 'unpaid' ? `
+                            <div class="mt-1">
+                                <button type="button" class="btn btn-sm btn-outline-primary py-0 px-2 xsmall fw-bold btn-confirm" data-id="${invoice.id}">Konfirmasi Bayar</button>
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            }
+
+            const statusDisplay = `
+                <span class="badge rounded-pill ${statusClass} px-3 py-2 small fw-bold">${capitalizeFirst(booking.status)}</span>
+                ${invoiceHTML}
+            `;
+
+            // Build actions dropdown
+            let actionsHTML = `
+                <div class="btn-group btn-group-sm">
+                    <a href="booking_edit.php?id=${booking.id}" class="btn btn-outline-light text-primary border-0" title="Edit">
+                        <i class="bi bi-pencil-square"></i>
+                    </a>
+                    <a href="booking_delete.php?id=${booking.id}" class="btn btn-outline-light text-danger border-0 delete-trigger" title="Hapus" data-message="Yakin ingin menghapus booking untuk acara '${escapeHtml(booking.event_name)}'?">
+                        <i class="bi bi-trash"></i>
+                    </a>
+                    <div class="btn-group">
+                        <button type="button" class="btn btn-outline-light text-success border-0 dropdown-toggle no-caret" data-bs-toggle="dropdown" title="Cetak">
+                            <i class="bi bi-printer"></i>
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end shadow border-0">
+            `;
+            
+            if (invoice) {
+                actionsHTML += `<li><a class="dropdown-item xsmall fw-bold" href="../invoice.php?id=${invoice.id}" target="_blank"><i class="bi bi-receipt me-2"></i> CETAK INVOICE</a></li>`;
+            }
+            
+            if (booking.status === 'approved') {
+                actionsHTML += `<li><a class="dropdown-item xsmall fw-bold" href="print_permit.php?id=${booking.id}" target="_blank"><i class="bi bi-file-earmark-check me-2"></i> CETAK SURAT IZIN</a></li>`;
+            }
+            
+            if (invoice && invoice.status === 'paid') {
+                actionsHTML += `<li><a class="dropdown-item xsmall fw-bold" href="print_receipt.php?id=${booking.id}" target="_blank"><i class="bi bi-patch-check me-2"></i> CETAK BUKTI BAYAR</a></li>`;
+            }
+            
+            if (invoice && booking.status !== 'pending' && booking.building_category === 'berbayar') {
+                actionsHTML += `<li><a class="dropdown-item xsmall fw-bold" href="print_skrd.php?id=${booking.id}" target="_blank"><i class="bi bi-file-earmark-text me-2"></i> CETAK SKR-D</a></li>`;
+            }
+            
+            actionsHTML += `
+                        </ul>
+                    </div>
+                </div>
+                ${booking.status === 'pending' ? `
+                    <div class="mt-2 d-flex justify-content-end gap-1">
+                        <form method="POST" class="d-inline">
+                            <input type="hidden" name="booking_id" value="${booking.id}">
+                            <input type="hidden" name="action" value="approve">
+                            <button type="submit" class="btn btn-sm btn-success px-2 py-0 xsmall fw-bold" title="Setujui">SETUJUI</button>
+                        </form>
+                        <form method="POST" class="d-inline">
+                            <input type="hidden" name="booking_id" value="${booking.id}">
+                            <input type="hidden" name="action" value="reject">
+                            <button type="submit" class="btn btn-sm btn-danger px-2 py-0 xsmall fw-bold" title="Tolak">TOLAK</button>
+                        </form>
+                    </div>
+                ` : ''}
+            `;
+
+            html += `
+                <tr>
+                    <td class="px-4 py-4">${dateDisplay}</td>
+                    <td class="px-4 py-4">${buildingDisplay}</td>
+                    <td class="px-4 py-4">${bookerDisplay}</td>
+                    <td class="px-4 py-4">${eventDisplay}</td>
+                    <td class="px-4 py-4 text-center">${statusDisplay}</td>
+                    <td class="px-4 py-4 text-end">${actionsHTML}</td>
+                </tr>
+            `;
+        }
+
+        tableBody.innerHTML = html;
+        initializeEventListeners();
+    }
+
+    function escapeHtml(text) {
+        if (!text) return '';
+        const map = {
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#039;'
+        };
+        return String(text).replace(/[&<>"]/g, function(m) { return map[m]; });
+    }
+
+    function capitalizeFirst(string) {
+        return string.charAt(0).toUpperCase() + string.slice(1);
+    }
+
+    function performSearch(query) {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(async function() {
+            try {
+                const response = await fetch('api_search.php?search=' + encodeURIComponent(query), {
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                });
+                const data = await response.json();
+                if (data.success) {
+                    await renderBookings(data.data, data.search_query);
+                }
+            } catch (error) {
+                console.error('Search error:', error);
+            }
+        }, 300); // Wait 300ms after last keystroke
+    }
+
+    if (searchInput) {
+        searchInput.addEventListener('input', function() {
+            performSearch(this.value);
+        });
+    }
+
+    // Add event detail modal
+    const eventDetailModalHTML = `
+        <div class="modal fade" id="eventDetailModal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content border-0 shadow">
+                    <div class="modal-header border-bottom-0">
+                        <h5 class="modal-title fw-bold" id="eventDetailTitle">Detail Acara</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body py-4">
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <small class="text-muted fw-semibold">Nama Peminjam</small>
+                                <p id="eventDetailName" class="mb-0 fw-medium"></p>
+                            </div>
+                            <div class="col-md-6">
+                                <small class="text-muted fw-semibold">Telepon</small>
+                                <p id="eventDetailPhone" class="mb-0 fw-medium"></p>
+                            </div>
+                            <div class="col-12">
+                                <small class="text-muted fw-semibold">Email</small>
+                                <p id="eventDetailEmail" class="mb-0 fw-medium"></p>
+                            </div>
+                            <div class="col-12">
+                                <small class="text-muted fw-semibold">Organisasi</small>
+                                <p id="eventDetailOrganization" class="mb-0 fw-medium"></p>
+                            </div>
+                            <div class="col-12">
+                                <small class="text-muted fw-semibold">Deskripsi</small>
+                                <p id="eventDetailDesc" class="mb-0 fw-medium"></p>
+                            </div>
+                            <div class="col-12">
+                                <a id="eventDetailProposal" href="#" target="_blank" class="btn btn-outline-primary btn-sm">
+                                    <i class="bi bi-file-earmark-pdf me-1"></i> Lihat Proposal
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer border-top-0 pt-0">
+                        <button type="button" class="btn btn-light px-4 fw-bold" data-bs-dismiss="modal">Tutup</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    if (!document.getElementById('eventDetailModal')) {
+        const div = document.createElement('div');
+        div.innerHTML = eventDetailModalHTML;
+        document.body.appendChild(div.firstElementChild);
+    }
+    
+    // Initialize listeners for existing elements
+    initializeEventListeners();
+});
+</script>
 
 <?php 
 include '../footer.php'; 

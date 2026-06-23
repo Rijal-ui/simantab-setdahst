@@ -53,7 +53,17 @@ include 'header.php';
                     <td class="px-4 py-4">
                         <?php if($building['category'] == 'berbayar'): ?>
                             <span class="badge bg-primary-subtle text-primary-emphasis px-2 py-1 xsmall fw-bold mb-1 d-inline-block">BERBAYAR</span>
-                            <div class="fw-bold text-primary small">Rp <?= number_format($building['price'], 0, ',', '.') ?></div>
+                            <?php 
+                            $rental_text = [
+                                'per_hari' => '/hari',
+                                'per_bulan' => '/bulan',
+                                'per_tahun' => '/tahun'
+                            ];
+                            ?>
+                            <div class="fw-bold text-primary small">Rp <?= number_format($building['price'], 0, ',', '.') ?> <?= $rental_text[$building['rental_type']] ?></div>
+                            <span class="badge bg-light text-dark px-2 py-1 xsmall fw-bold d-inline-block mt-1">
+                                <?= strtoupper(str_replace('per_', '', $building['rental_type'])) ?>
+                            </span>
                         <?php else: ?>
                             <span class="badge bg-success-subtle text-success-emphasis px-2 py-1 xsmall fw-bold d-inline-block">GRATIS</span>
                         <?php endif; ?>

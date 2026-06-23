@@ -8,7 +8,7 @@ $error = '';
 $booking = null;
 
 if ($id) {
-    $stmt = $pdo->prepare("SELECT b.*, g.name as building_name, g.category as building_category, g.price as building_price FROM bookings b JOIN buildings g ON b.building_id = g.id WHERE b.id = ?");
+    $stmt = $pdo->prepare("SELECT b.*, g.name as building_name, g.category as building_category, g.price as building_price, g.rental_type as rental_type FROM bookings b JOIN buildings g ON b.building_id = g.id WHERE b.id = ?");
     $stmt->execute([$id]);
     $booking = $stmt->fetch(PDO::FETCH_ASSOC);
 }
@@ -67,12 +67,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $temp_building_stmt = $pdo->prepare("SELECT * FROM buildings WHERE id = ?");
     $temp_building_stmt->execute([$building_id]);
     $temp_building = $temp_building_stmt->fetch(PDO::FETCH_ASSOC);
-    $is_atm = stripos($temp_building['name'], 'ATM') !== false;
+    $rental_type = $temp_building['rental_type'] ?? 'per_hari';
     
     // Handle date for multi-day booking
     $is_multi_day_post = isset($_POST['is_multi_day']) && $_POST['is_multi_day'] === '1';
     
-    if ($is_atm) {
+    if ($rental_type === 'per_tahun') {
         $booking_year = $_POST['booking_year'] ?? date('Y');
         $booking_date = $booking_year . '-01-01';
         $start_time = '00:00:00';
@@ -85,8 +85,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $booking_date = $date_from;
     } else {
         $booking_date = $_POST['booking_date'];
-        $start_time = $_POST['start_time'];
-        $end_time = $_POST['end_time'];
+        if ($rental_type === 'per_bulan') {
+            $start_time = '00:00:00';
+            $end_time = '23:59:59';
+        } else {
+            $start_time = $_POST['start_time'];
+            $end_time = $_POST['end_time'];
+        }
     }
     
     $status = $_POST['status'];
@@ -182,9 +187,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $building_stmt->execute([$building_id]);
             $building = $building_stmt->fetch(PDO::FETCH_ASSOC);
 
-            // Process add-on items if building is not Ruang Rapat Setda, not free, and not ATM
+            // Process add-on items if building is not Ruang Rapat Setda, not free, and is per_hari
             $total_item_price = 0;
-            if (trim($building['name']) !== 'Ruang Rapat Sekretariat Daerah Kab. Hulu Sungai Tengah' && $building['category'] !== 'gratis' && !$is_atm) {
+            if (trim($building['name']) !== 'Ruang Rapat Sekretariat Daerah Kab. Hulu Sungai Tengah' && $building['category'] !== 'gratis' && $rental_type === 'per_hari') {
                 // Delete old items first
                 if ($is_multi_day_post) {
                     foreach ($new_booking_ids as $bid) {
@@ -219,13 +224,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             // Calculate invoice amount
-            $building_price_per_day = ($building['category'] === 'berbayar' ? $building['price'] : 0);
+            $building_price = ($building['category'] === 'berbayar' ? $building['price'] : 0);
             
-            if ($is_atm) {
-                $total_building_cost = $building_price_per_day * 12;
-            } else {
+            if ($rental_type === 'per_hari') {
                 $num_days = $is_multi_day_post ? count($new_booking_ids) : 1;
-                $total_building_cost = $building_price_per_day * $num_days;
+                $total_building_cost = $building_price * $num_days;
+            } elseif ($rental_type === 'per_bulan') {
+                if ($is_multi_day_post) {
+                    $start_date = new DateTime($date_from);
+                    $end_date = new DateTime($date_to);
+                    $interval = $start_date->diff($end_date);
+                    $num_months = $interval->m + ($interval->y * 12);
+                    if ($interval->d > 0) $num_months += 1;
+                } else {
+                    $num_months = 1;
+                }
+                $total_building_cost = $building_price * $num_months;
+            } elseif ($rental_type === 'per_tahun') {
+                $total_building_cost = $building_price;
+            } else {
+                $total_building_cost = $building_price;
             }
             
             $final_amount = $total_building_cost + $total_item_price;
@@ -402,29 +420,43 @@ include 'header.php';
                     <div class="card border-0 shadow-sm rounded-3 mb-4">
                         <div class="card-body p-4">
                             <h5 class="fw-bold mb-4 text-dark border-bottom pb-2">Jadwal Pelaksanaan</h5>
-                            <div class="row g-3">
+                            <div class="row g-3" id="date-time-wrapper">
                                 <?php 
-                                $is_atm_booking = stripos($booking['building_name'], 'ATM') !== false;
-                                if (!$is_atm_booking): 
+                                $booking_rental_type = $booking['rental_type'] ?? 'per_hari';
+                                if ($booking_rental_type === 'per_tahun'): 
                                 ?>
+                                <div class="col-md-12">
+                                    <label class="form-label small fw-bold text-secondary">Tahun Sewa</label>
+                                    <select name="booking_year" class="form-select bg-light border-0 py-2 shadow-none" required>
+                                        <?php 
+                                        $current_year = date('Y');
+                                        $booking_year = date('Y', strtotime($booking['booking_date']));
+                                        for ($y = $current_year - 5; $y <= $current_year + 5; $y++): 
+                                        ?>
+                                        <option value="<?= $y ?>" <?= $y == $booking_year ? 'selected' : '' ?>><?= $y ?></option>
+                                        <?php endfor; ?>
+                                    </select>
+                                </div>
+                                <?php else: ?>
                                 <div class="col-12 mb-2">
                                     <div class="form-check">
                                         <input type="checkbox" id="is_multi_day" name="is_multi_day" value="1" class="form-check-input" <?= $is_multi_day ? 'checked' : '' ?>>
                                         <label class="form-check-label small" for="is_multi_day">
-                                            Booking untuk Beberapa Hari
+                                            Booking untuk Beberapa <?= $booking_rental_type === 'per_bulan' ? 'Bulan' : 'Hari' ?>
                                         </label>
                                     </div>
                                 </div>
                                 
                                 <div id="single-day-fields" class="col-12 <?= $is_multi_day ? 'd-none' : '' ?>">
                                     <div class="row g-3">
-                                        <div class="col-md-4">
-                                            <label class="form-label small fw-bold text-secondary">Tanggal</label>
+                                        <div class="col-md-<?= $booking_rental_type === 'per_bulan' ? '12' : '4' ?>">
+                                            <label class="form-label small fw-bold text-secondary"><?= $booking_rental_type === 'per_bulan' ? 'Tanggal Mulai' : 'Tanggal' ?></label>
                                             <div class="input-group">
                                                 <span class="input-group-text bg-light border-0"><i class="bi bi-calendar text-muted"></i></span>
                                                 <input type="date" name="booking_date" value="<?= htmlspecialchars($booking['booking_date']) ?>" required class="form-control bg-light border-0 py-2 shadow-none">
                                             </div>
                                         </div>
+                                        <?php if ($booking_rental_type === 'per_hari'): ?>
                                         <div class="col-md-4">
                                             <label class="form-label small fw-bold text-secondary">Jam Mulai</label>
                                             <div class="input-group">
@@ -439,6 +471,7 @@ include 'header.php';
                                                 <input type="text" name="end_time" value="<?= date('H:i', strtotime($booking['end_time'])) ?>" required class="form-control bg-light border-0 py-2 shadow-none timepicker">
                                             </div>
                                         </div>
+                                        <?php endif; ?>
                                     </div>
                                 </div>
                                 
@@ -460,30 +493,18 @@ include 'header.php';
                                         </div>
                                     </div>
                                 </div>
-                                <?php else: ?>
-                                <div class="col-md-12">
-                                    <label class="form-label small fw-bold text-secondary">Tahun Sewa</label>
-                                    <select name="booking_year" class="form-select bg-light border-0 py-2 shadow-none" required>
-                                        <?php 
-                                        $current_year = date('Y');
-                                        $booking_year = date('Y', strtotime($booking['booking_date']));
-                                        for ($y = $current_year - 5; $y <= $current_year + 5; $y++): 
-                                        ?>
-                                        <option value="<?= $y ?>" <?= $y == $booking_year ? 'selected' : '' ?>><?= $y ?></option>
-                                        <?php endfor; ?>
-                                    </select>
-                                </div>
                                 <?php endif; ?>
                             </div>
                         </div>
                     </div>
 
                     <?php 
-                    // Show add-on items if not Ruang Rapat Setda, building is not free, and not ATM
+                    // Show add-on items if not Ruang Rapat Setda, building is not free, and is per_hari
                     $booking_building_stmt = $pdo->prepare("SELECT * FROM buildings WHERE id = ?");
                     $booking_building_stmt->execute([$booking['building_id']]);
                     $booking_building = $booking_building_stmt->fetch(PDO::FETCH_ASSOC);
-                    if (trim($booking_building['name']) !== 'Ruang Rapat Sekretariat Daerah Kab. Hulu Sungai Tengah' && $booking_building['category'] !== 'gratis' && !$is_atm_booking): 
+                    $booking_building_rental_type = $booking_building['rental_type'] ?? 'per_hari';
+                    if (trim($booking_building['name']) !== 'Ruang Rapat Sekretariat Daerah Kab. Hulu Sungai Tengah' && $booking_building['category'] !== 'gratis' && $booking_building_rental_type === 'per_hari'): 
                     ?>
                     <div class="card border-0 shadow-sm rounded-3">
                         <div class="card-body p-4">
@@ -529,9 +550,9 @@ include 'header.php';
 
                             <div class="mb-4">
                                 <label class="form-label small fw-bold text-secondary">Pilih Gedung</label>
-                                <select name="building_id" class="form-select bg-light border-0 py-2 shadow-none">
+                                <select name="building_id" id="edit-building-select" class="form-select bg-light border-0 py-2 shadow-none">
                                     <?php foreach($buildings as $b): ?>
-                                        <option value="<?= $b['id'] ?>" <?= $booking['building_id'] == $b['id'] ? 'selected' : '' ?>>
+                                        <option value="<?= $b['id'] ?>" data-rental-type="<?= htmlspecialchars($b['rental_type'] ?? 'per_hari') ?>" <?= $booking['building_id'] == $b['id'] ? 'selected' : '' ?>>
                                             <?= htmlspecialchars($b['name']) ?>
                                         </option>
                                     <?php endforeach; ?>
@@ -587,6 +608,129 @@ document.addEventListener('DOMContentLoaded', function() {
         locale: "id",
         allowInput: true
     });
+    
+    // Handle building change
+    const editBuildingSelect = document.getElementById('edit-building-select');
+    const dateTimeWrapper = document.getElementById('date-time-wrapper');
+    
+    function updateDateTimeFields() {
+        const selectedOption = editBuildingSelect.options[editBuildingSelect.selectedIndex];
+        const rentalType = selectedOption.dataset.rentalType || 'per_hari';
+        
+        let html = '';
+        
+        if (rentalType === 'per_tahun') {
+            const currentYear = new Date().getFullYear();
+            let yearOptions = '';
+            for (let y = currentYear - 5; y <= currentYear + 5; y++) {
+                yearOptions += `<option value="${y}">${y}</option>`;
+            }
+            html = `
+                <div class="col-md-12">
+                    <label class="form-label small fw-bold text-secondary">Tahun Sewa</label>
+                    <select name="booking_year" class="form-select bg-light border-0 py-2 shadow-none" required>
+                        <option value="">-- Pilih Tahun --</option>
+                        ${yearOptions}
+                    </select>
+                </div>
+            `;
+        } else {
+            const multiLabel = rentalType === 'per_bulan' ? 'Bulan' : 'Hari';
+            html = `
+                <div class="col-12 mb-2">
+                    <div class="form-check">
+                        <input type="checkbox" id="is_multi_day" name="is_multi_day" value="1" class="form-check-input">
+                        <label class="form-check-label small" for="is_multi_day">
+                            Booking untuk Beberapa ${multiLabel}
+                        </label>
+                    </div>
+                </div>
+                
+                <div id="single-day-fields" class="col-12">
+                    <div class="row g-3">
+                        <div class="col-md-${rentalType === 'per_bulan' ? '12' : '4'}">
+                            <label class="form-label small fw-bold text-secondary">${rentalType === 'per_bulan' ? 'Tanggal Mulai' : 'Tanggal'}</label>
+                            <div class="input-group">
+                                <span class="input-group-text bg-light border-0"><i class="bi bi-calendar text-muted"></i></span>
+                                <input type="date" name="booking_date" required class="form-control bg-light border-0 py-2 shadow-none">
+                            </div>
+                        </div>
+                        ${rentalType === 'per_hari' ? `
+                        <div class="col-md-4">
+                            <label class="form-label small fw-bold text-secondary">Jam Mulai</label>
+                            <div class="input-group">
+                                <span class="input-group-text bg-light border-0"><i class="bi bi-clock text-muted"></i></span>
+                                <input type="text" name="start_time" required class="form-control bg-light border-0 py-2 shadow-none timepicker">
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-bold text-secondary">Jam Selesai</label>
+                            <div class="input-group">
+                                <span class="input-group-text bg-light border-0"><i class="bi bi-clock-history text-muted"></i></span>
+                                <input type="text" name="end_time" required class="form-control bg-light border-0 py-2 shadow-none timepicker">
+                            </div>
+                        </div>
+                        ` : ''}
+                    </div>
+                </div>
+                
+                <div id="multi-day-fields" class="col-12 d-none">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label small fw-bold text-secondary">Tanggal Mulai</label>
+                            <div class="input-group">
+                                <span class="input-group-text bg-light border-0"><i class="bi bi-calendar text-muted"></i></span>
+                                <input type="date" name="date_from" required class="form-control bg-light border-0 py-2 shadow-none">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small fw-bold text-secondary">Tanggal Selesai</label>
+                            <div class="input-group">
+                                <span class="input-group-text bg-light border-0"><i class="bi bi-calendar text-muted"></i></span>
+                                <input type="date" name="date_to" required class="form-control bg-light border-0 py-2 shadow-none">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        dateTimeWrapper.innerHTML = html;
+        
+        // Re-initialize timepicker and multi-day logic
+        if (rentalType === 'per_hari') {
+            flatpickr("#start_time, #end_time", {
+                enableTime: true,
+                noCalendar: true,
+                dateFormat: "H:i",
+                time_24hr: true,
+                locale: "id",
+                allowInput: true
+            });
+        }
+        
+        const multiDayCheckbox = document.getElementById('is_multi_day');
+        if (multiDayCheckbox) {
+            const singleDayFields = document.getElementById('single-day-fields');
+            const multiDayFields = document.getElementById('multi-day-fields');
+            
+            function toggleFields() {
+                if (multiDayCheckbox.checked) {
+                    singleDayFields.classList.add('d-none');
+                    multiDayFields.classList.remove('d-none');
+                } else {
+                    singleDayFields.classList.remove('d-none');
+                    multiDayFields.classList.add('d-none');
+                }
+            }
+            
+            multiDayCheckbox.addEventListener('change', toggleFields);
+        }
+    }
+    
+    if (editBuildingSelect) {
+        editBuildingSelect.addEventListener('change', updateDateTimeFields);
+    }
     
     // Handle multi-day toggle
     const multiDayCheckbox = document.getElementById('is_multi_day');

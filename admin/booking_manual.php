@@ -48,12 +48,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $bStmt = $pdo->prepare("SELECT * FROM buildings WHERE id = ?");
     $bStmt->execute([$building_id]);
     $building = $bStmt->fetch(PDO::FETCH_ASSOC);
-    $is_atm_building = stripos($building['name'], 'ATM') !== false;
+    $rental_type = $building['rental_type'] ?? 'per_hari';
 
     // Basic validation
     if (!$building_id || !$booker_name || !$event_name) {
         $error = "Mohon lengkapi semua field yang wajib.";
-    } elseif ($is_atm_building) {
+    } elseif ($rental_type === 'per_tahun') {
         $booking_year = $_POST['booking_year'] ?? null;
         if (!$booking_year) {
             $error = "Mohon pilih tahun sewa.";
@@ -68,15 +68,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         if ($is_multi_day) {
             if (!$date_from || !$date_to) {
-                $error = "Mohon isi tanggal mulai dan tanggal selesai untuk booking beberapa hari.";
+                $error = $rental_type === 'per_bulan' 
+                    ? "Mohon isi tanggal mulai dan tanggal selesai untuk booking beberapa bulan." 
+                    : "Mohon isi tanggal mulai dan tanggal selesai untuk booking beberapa hari.";
             } elseif (strtotime($date_from) > strtotime($date_to)) {
                 $error = "Tanggal selesai tidak boleh lebih awal dari tanggal mulai.";
             }
         } else {
-            if (!$booking_date || !$start_time || !$end_time) {
-                $error = "Mohon isi tanggal, jam mulai, dan jam selesai.";
-            } elseif (strtotime($end_time) <= strtotime($start_time)) {
-                $error = "Jam selesai harus lebih besar dari jam mulai.";
+            if ($rental_type === 'per_bulan') {
+                if (!$booking_date) {
+                    $error = "Mohon isi tanggal mulai untuk booking 1 bulan.";
+                }
+            } else {
+                if (!$booking_date || !$start_time || !$end_time) {
+                    $error = "Mohon isi tanggal, jam mulai, dan jam selesai.";
+                } elseif (strtotime($end_time) <= strtotime($start_time)) {
+                    $error = "Jam selesai harus lebih besar dari jam mulai.";
+                }
             }
         }
     }
@@ -91,10 +99,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $bStmt = $pdo->prepare("SELECT * FROM buildings WHERE id = ?");
             $bStmt->execute([$building_id]);
             $building = $bStmt->fetch(PDO::FETCH_ASSOC);
-            $is_atm_building = stripos($building['name'], 'ATM') !== false;
+            $rental_type = $building['rental_type'] ?? 'per_hari';
 
             $dates = [];
-            if ($is_atm_building) {
+            if ($rental_type === 'per_tahun') {
                 $booking_year = $_POST['booking_year'];
                 $dates[] = $booking_year . '-01-01';
                 $start_time_use = '00:00:00';
@@ -114,8 +122,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $end_time_use = '23:59:59';
                 } else {
                     $dates[] = $_POST['booking_date'];
-                    $start_time_use = $_POST['start_time'];
-                    $end_time_use = $_POST['end_time'];
+                    if ($rental_type === 'per_bulan') {
+                        $start_time_use = '00:00:00';
+                        $end_time_use = '23:59:59';
+                    } else {
+                        $start_time_use = $_POST['start_time'];
+                        $end_time_use = $_POST['end_time'];
+                    }
                 }
             }
 
@@ -141,8 +154,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
 
-            // Check availability for each date
-            if (!$is_atm_building) {
+            // Check availability for each date (only for daily rental)
+            if ($rental_type === 'per_hari') {
                 foreach ($dates as $date) {
                     $checkStmt = $pdo->prepare("SELECT COUNT(*) FROM bookings 
                         WHERE building_id = ? 
@@ -171,10 +184,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Create invoice if needed
             if ($primary_booking_id && $building['category'] === 'berbayar') {
                 $total_building_cost = $building['price'];
-                if ($is_atm_building) {
-                    $total_building_cost = $building['price'] * 12;
-                } else {
+                
+                if ($rental_type === 'per_hari') {
                     $total_building_cost = $building['price'] * count($dates);
+                } elseif ($rental_type === 'per_bulan') {
+                    $is_multi_day = isset($_POST['is_multi_day']) && $_POST['is_multi_day'] === '1';
+                    if ($is_multi_day) {
+                        $start_date = new DateTime($_POST['date_from']);
+                        $end_date = new DateTime($_POST['date_to']);
+                        $interval = $start_date->diff($end_date);
+                        $number_of_months = $interval->m + ($interval->y * 12);
+                        if ($interval->d > 0) $number_of_months += 1;
+                    } else {
+                        $number_of_months = 1;
+                    }
+                    $total_building_cost = $building['price'] * $number_of_months;
+                } elseif ($rental_type === 'per_tahun') {
+                    $total_building_cost = $building['price'];
                 }
                 
                 if ($total_building_cost > 0) {
@@ -301,7 +327,7 @@ include 'header.php';
                                 <select name="building_id" required class="form-select" id="buildingSelect">
                                     <option value="">-- Pilih Gedung --</option>
                                     <?php foreach($buildings as $b): ?>
-                                        <option value="<?= $b['id'] ?>"><?= htmlspecialchars($b['name']) ?></option>
+                                        <option value="<?= $b['id'] ?>" data-rental-type="<?= htmlspecialchars($b['rental_type'] ?? 'per_hari') ?>"><?= htmlspecialchars($b['name']) ?></option>
                                     <?php endforeach; ?>
                                 </select>
                             </div>
@@ -372,9 +398,9 @@ include 'header.php';
         function updateDateTimeFields() {
             const selectedOption = buildingSelect.options[buildingSelect.selectedIndex];
             const buildingName = selectedOption.text;
-            const isAtm = buildingName.toLowerCase().includes('atm');
+            const rentalType = selectedOption.dataset.rentalType || 'per_hari';
             
-            if (isAtm) {
+            if (rentalType === 'per_tahun') {
                 const currentYear = new Date().getFullYear();
                 let yearOptions = '';
                 for (let y = currentYear - 5; y <= currentYear + 5; y++) {
@@ -390,20 +416,26 @@ include 'header.php';
                     </div>
                 `;
             } else {
+                const multiLabel = rentalType === 'per_bulan' ? 'Booking untuk Beberapa Bulan' : 'Booking untuk Beberapa Hari';
+                const multiNote = rentalType === 'per_bulan' 
+                    ? 'Catatan: Booking lebih dari 1 (satu) bulan tidak membutuhkan jam. Untuk satu bulan, hanya butuh tanggal mulai.' 
+                    : 'Catatan: Booking lebih dari 1 (satu) hari tidak membutuhkan jam. Untuk satu hari, jam wajib diisi.';
+                
                 dateTimeContainer.innerHTML = `
                     <div class="form-check mb-3">
                         <input type="checkbox" id="is_multi_day" name="is_multi_day" value="1" class="form-check-input">
                         <label class="form-check-label small" for="is_multi_day">
-                            Booking untuk Beberapa Hari
-                            <div class="form-text xsmall mt-1"><i>Centang apabila sewa lebih dari 1 (satu) hari.</i></div>
+                            ${multiLabel}
+                            <div class="form-text xsmall mt-1"><i>Centang apabila sewa lebih dari 1 (satu) ${rentalType === 'per_bulan' ? 'bulan' : 'hari'}.</i></div>
                         </label>
                     </div>
                     
                     <div id="single-day-fields" class="row g-3">
-                        <div class="col-md-4">
-                            <label class="form-label small fw-medium">Tanggal</label>
+                        <div class="col-md-${rentalType === 'per_bulan' ? '12' : '4'}">
+                            <label class="form-label small fw-medium">${rentalType === 'per_bulan' ? 'Tanggal Mulai' : 'Tanggal'}</label>
                             <input type="date" name="booking_date" class="form-control">
                         </div>
+                        ${rentalType === 'per_hari' ? `
                         <div class="col-md-4">
                             <label class="form-label small fw-medium">Jam Mulai</label>
                             <div class="input-group">
@@ -418,6 +450,7 @@ include 'header.php';
                                 <input type="text" name="end_time" id="end_time" class="form-control bg-light border-0 py-2 shadow-none timepicker" placeholder="--:--">
                             </div>
                         </div>
+                        ` : ''}
                     </div>
 
                     <div id="multi-day-fields" class="row g-3 d-none">
@@ -430,7 +463,7 @@ include 'header.php';
                             <input type="date" name="date_to" class="form-control">
                         </div>
                     </div>
-                    <div class="form-text xsmall mt-2"><i>Catatan: Booking lebih dari 1 (satu) hari tidak membutuhkan jam. Untuk satu hari, jam wajib diisi.</i></div>
+                    <div class="form-text xsmall mt-2"><i>${multiNote}</i></div>
                 `;
                 
                 // Re-attach multi-day sync logic

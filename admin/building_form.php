@@ -20,6 +20,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $description = $_POST['description'];
     $requirements = $_POST['requirements'];
     $category = $_POST['category'];
+    $rental_type = $_POST['rental_type'] ?? 'per_hari';
     $price = $_POST['price'] ?? 0;
     $quantity = $_POST['quantity'] ?? 1;
 
@@ -60,15 +61,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!$error) {
         try {
             if ($id) {
-                $stmt = $pdo->prepare("UPDATE buildings SET name=?, capacity=?, location=?, description=?, requirements=?, category=?, price=?, quantity=?, image_url=? WHERE id=?");
-                $stmt->execute([$name, $capacity, $location, $description, $requirements, $category, $price, $quantity, $image_url, $id]);
+                $stmt = $pdo->prepare("UPDATE buildings SET name=?, capacity=?, location=?, description=?, requirements=?, category=?, rental_type=?, price=?, quantity=?, image_url=? WHERE id=?");
+                $stmt->execute([$name, $capacity, $location, $description, $requirements, $category, $rental_type, $price, $quantity, $image_url, $id]);
                 $message = "Aset berhasil diperbarui!";
                 $stmt = $pdo->prepare("SELECT * FROM buildings WHERE id = ?");
                 $stmt->execute([$id]);
                 $building = $stmt->fetch(PDO::FETCH_ASSOC);
             } else {
-                $stmt = $pdo->prepare("INSERT INTO buildings (name, capacity, location, description, requirements, category, price, quantity, image_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
-                $stmt->execute([$name, $capacity, $location, $description, $requirements, $category, $price, $quantity, $image_url]);
+                $stmt = $pdo->prepare("INSERT INTO buildings (name, capacity, location, description, requirements, category, rental_type, price, quantity, image_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                $stmt->execute([$name, $capacity, $location, $description, $requirements, $category, $rental_type, $price, $quantity, $image_url]);
                 header("Location: buildings.php");
                 exit;
             }
@@ -153,7 +154,7 @@ include 'header.php';
                     </div>
 
                     <div class="row g-3 mb-4">
-                        <div class="col-md-6">
+                        <div class="col-md-4">
                             <label class="form-label small fw-bold text-secondary">Kategori</label>
                             <div class="input-group">
                                 <span class="input-group-text bg-light border-0"><i class="bi bi-list-stars text-muted"></i></span>
@@ -163,9 +164,22 @@ include 'header.php';
                                 </select>
                             </div>
                         </div>
-                        <div class="col-md-6" id="price-field-wrapper">
+                        <div class="col-md-4" id="rental-type-wrapper">
+                            <div id="rental-type-field" class="<?= ($building['category'] ?? 'gratis') == 'gratis' ? 'd-none' : '' ?>">
+                                <label class="form-label small fw-bold text-secondary">Tipe Sewa</label>
+                                <div class="input-group">
+                                    <span class="input-group-text bg-light border-0"><i class="bi bi-calendar2-week text-muted"></i></span>
+                                    <select name="rental_type" id="rental_type" class="form-select bg-light border-0 py-2 shadow-none">
+                                        <option value="per_hari" <?= ($building['rental_type'] ?? 'per_hari') == 'per_hari' ? 'selected' : '' ?>>Per Hari</option>
+                                        <option value="per_bulan" <?= ($building['rental_type'] ?? 'per_hari') == 'per_bulan' ? 'selected' : '' ?>>Per Bulan</option>
+                                        <option value="per_tahun" <?= ($building['rental_type'] ?? 'per_hari') == 'per_tahun' ? 'selected' : '' ?>>Per Tahun</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4" id="price-field-wrapper">
                             <div id="price-field" class="<?= ($building['category'] ?? 'gratis') == 'gratis' ? 'd-none' : '' ?>">
-                                <label class="form-label small fw-bold text-secondary">Harga Sewa (Rp / hari)</label>
+                                <label class="form-label small fw-bold text-secondary" id="price-label">Harga Sewa (Rp / hari)</label>
                                 <div class="input-group">
                                     <span class="input-group-text bg-light border-0"><i class="bi bi-tag text-muted"></i></span>
                                     <input type="number" name="price" value="<?= htmlspecialchars($building['price'] ?? 0) ?>" step="1" class="form-control bg-light border-0 py-2 shadow-none">
@@ -198,14 +212,38 @@ include 'header.php';
     document.addEventListener('DOMContentLoaded', function() {
         const categorySelect = document.getElementById('category');
         const priceField = document.getElementById('price-field');
+        const rentalTypeField = document.getElementById('rental-type-field');
+        const rentalTypeSelect = document.getElementById('rental_type');
+        const priceLabel = document.getElementById('price-label');
 
+        // Function to update price label based on rental type
+        function updatePriceLabel() {
+            const type = rentalTypeSelect.value;
+            if (type === 'per_hari') {
+                priceLabel.textContent = 'Harga Sewa (Rp / hari)';
+            } else if (type === 'per_bulan') {
+                priceLabel.textContent = 'Harga Sewa (Rp / bulan)';
+            } else if (type === 'per_tahun') {
+                priceLabel.textContent = 'Harga Sewa (Rp / tahun)';
+            }
+        }
+
+        // Show/hide fields based on category
         categorySelect.addEventListener('change', function() {
             if (this.value === 'berbayar') {
                 priceField.classList.remove('d-none');
+                rentalTypeField.classList.remove('d-none');
             } else {
                 priceField.classList.add('d-none');
+                rentalTypeField.classList.add('d-none');
             }
         });
+
+        // Update price label when rental type changes
+        rentalTypeSelect.addEventListener('change', updatePriceLabel);
+
+        // Initial update
+        updatePriceLabel();
     });
 </script>
 

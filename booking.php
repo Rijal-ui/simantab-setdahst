@@ -62,14 +62,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     // Simple validation
-    $is_atm_building = stripos($building['name'], 'ATM') !== false;
+    $rental_type = $building['rental_type'] ?? 'per_hari';
     
     if (!$building_id || !$booker_name) {
         $error = "Mohon lengkapi semua field yang wajib.";
     }
     
-    if ($is_atm_building) {
-        // For ATM buildings, only need year
+    if ($rental_type === 'per_tahun') {
+        // For yearly rental, only need year
         $booking_year = $_POST['booking_year'] ?? null;
         if (!$booking_year) {
             $error = "Mohon pilih tahun sewa.";
@@ -79,7 +79,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $start_time = '00:00:00';
         $end_time = '23:59:59';
         $is_multi_day = false;
+    } elseif ($rental_type === 'per_bulan') {
+        // For monthly rental
+        if (!$error && $is_multi_day) {
+            if (!$date_from || !$date_to) {
+                $error = "Mohon isi tanggal mulai dan tanggal selesai untuk booking beberapa bulan.";
+            } elseif (strtotime($date_from) === false || strtotime($date_to) === false) {
+                $error = "Format tanggal tidak valid.";
+            } elseif (strtotime($date_from) > strtotime($date_to)) {
+                $error = "Tanggal selesai tidak boleh lebih awal dari tanggal mulai.";
+            }
+        }
+        if (!$error && !$is_multi_day) {
+            if (!$booking_date) {
+                $error = "Untuk booking 1 bulan, mohon isi tanggal mulai.";
+            }
+            // Set time to full day
+            $start_time = '00:00:00';
+            $end_time = '23:59:59';
+        }
     } else {
+        // For daily rental (default)
         if (!$error && $is_multi_day) {
             if (!$date_from || !$date_to) {
                 $error = "Mohon isi tanggal mulai dan tanggal selesai untuk booking beberapa hari.";
@@ -99,6 +119,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     // Restriction: Maximum H-3 (Booking must be at least 3 days before the event) - DISABLED
+    /*
     if (!$error) {
         $today = new DateTime();
         $today->setTime(0, 0, 0);
@@ -116,6 +137,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
     }
+    */
 
     if (!$error) {
         // Check availability & create bookings
@@ -182,9 +204,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
 
-            // Process and save add-on items (Skip for Ruang Rapat Setda, Free buildings, and ATM buildings)
+            // Process and save add-on items (Skip for Ruang Rapat Setda, Free buildings, and yearly/monthly rentals)
             $total_item_price = 0;
-            if (trim($building['name']) !== 'Ruang Rapat Sekretariat Daerah Kab. Hulu Sungai Tengah' && $building['category'] !== 'gratis' && !$is_atm_building) {
+            if (trim($building['name']) !== 'Ruang Rapat Sekretariat Daerah Kab. Hulu Sungai Tengah' && $building['category'] !== 'gratis' && $rental_type === 'per_hari') {
                 $ordered_items = $_POST['items'] ?? [];
                 foreach ($available_items as $item) {
                     if (isset($ordered_items[$item['id']]) && $ordered_items[$item['id']] > 0) {
@@ -200,13 +222,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             // Calculate final invoice amount
             $number_of_days = count($dates);
-            $building_price_per_day = ($building['category'] === 'berbayar' ? $building['price'] : 0);
+            $building_price = ($building['category'] === 'berbayar' ? $building['price'] : 0);
+            $rental_type = $building['rental_type'] ?? 'per_hari';
             
-            if ($is_atm_building) {
-                // For ATM buildings, price is per year (already stored as price per month in DB, multiply by 12)
-                $total_building_cost = $building_price_per_day * 12;
+            // Calculate based on rental type
+            if ($rental_type === 'per_hari') {
+                $total_building_cost = $building_price * $number_of_days;
+            } elseif ($rental_type === 'per_bulan') {
+                // Calculate number of months
+                if ($is_multi_day) {
+                    $start_date = new DateTime($date_from);
+                    $end_date = new DateTime($date_to);
+                    $interval = $start_date->diff($end_date);
+                    $number_of_months = $interval->m + ($interval->y * 12);
+                    if ($interval->d > 0) $number_of_months += 1; // Round up if there are extra days
+                } else {
+                    $number_of_months = 1;
+                }
+                $total_building_cost = $building_price * $number_of_months;
+            } elseif ($rental_type === 'per_tahun') {
+                // Calculate number of years
+                if ($is_multi_day) {
+                    $start_date = new DateTime($date_from);
+                    $end_date = new DateTime($date_to);
+                    $interval = $start_date->diff($end_date);
+                    $number_of_years = $interval->y;
+                    if ($interval->m > 0 || $interval->d > 0) $number_of_years += 1; // Round up
+                } else {
+                    $number_of_years = 1;
+                }
+                $total_building_cost = $building_price * $number_of_years;
             } else {
-                $total_building_cost = $building_price_per_day * $number_of_days;
+                $total_building_cost = $building_price * $number_of_days;
             }
             
             $final_amount = $total_building_cost + $total_item_price;
@@ -361,93 +408,76 @@ include 'header.php';
 
                 <script>
                 document.addEventListener('DOMContentLoaded', function() {
-                const buildingName = "<?= htmlspecialchars(trim($building['name'] ?? '')) ?>";
-                const bName = buildingName.toLowerCase();
+                    const buildingName = "<?= htmlspecialchars(trim($building['name'] ?? '')) ?>";
 
-                var cb = document.getElementById('is_multi_day');
-                var single = document.getElementById('single-day-fields');
-                var multi = document.getElementById('multi-day-fields');
-                
-                function sync() {
-                    if (cb.checked) {
-                        multi.classList.remove('d-none');
-                        single.classList.add('d-none');
-                        single.querySelectorAll('input').forEach(i => i.required = false);
-                        multi.querySelectorAll('input').forEach(i => i.required = true);
-                    } else {
-                        multi.classList.add('d-none');
-                        single.classList.remove('d-none');
-                        single.querySelectorAll('input').forEach(i => i.required = true);
-                        multi.querySelectorAll('input').forEach(i => i.required = false);
+                    var cb = document.getElementById('is_multi_day');
+                    var single = document.getElementById('single-day-fields');
+                    var multi = document.getElementById('multi-day-fields');
+                    function sync() {
+                        if (cb.checked) {
+                            multi.classList.remove('d-none');
+                            single.classList.add('d-none');
+                            single.querySelectorAll('input').forEach(i => i.required = false);
+                            multi.querySelectorAll('input').forEach(i => i.required = true);
+                        } else {
+                            multi.classList.add('d-none');
+                            single.classList.remove('d-none');
+                            single.querySelectorAll('input').forEach(i => i.required = true);
+                            multi.querySelectorAll('input').forEach(i => i.required = false);
+                        }
                     }
-                }
-                if(cb) cb.addEventListener('change', sync);
-                sync();
+                    cb.addEventListener('change', sync);
+                    sync();
 
-                // 1. Hitung Batasan H-3 (Tanggal minimal yang boleh dipilih)
-                const minBookingDate = new Date();
-                minBookingDate.setDate(minBookingDate.getDate() + 3);
+                    // Initialize Flatpickr with conditional restrictions
+                    let flatpickrConfig = {
+                        enableTime: true,
+                        noCalendar: true,
+                        dateFormat: "H:i",
+                        time_24hr: true,
+                        locale: "id",
+                        allowInput: true
+                    };
 
-                // 2. Konfigurasi dasar untuk pemilihan TANGGAL (Berlaku untuk semua gedung)
-                let datePickerConfig = {
-                    minDate: minBookingDate, // Mengaktifkan batasan H-3 secara mutlak di semua gedung
-                    locale: "id",
-                    dateFormat: "Y-m-d",
-                    disableMobile: true,     // Mengunci performa kalender agar valid di iPhone/Safari
-                    disable: []              // Tempat menampung filter hari jika diperlukan
-                };
+                    const startTimeInput = document.getElementById('start_time');
+                    const endTimeInput = document.getElementById('end_time');
+                    const bName = buildingName.toLowerCase();
 
-                // 3. Konfigurasi dasar untuk pemilihan JAM (Timepicker)
-                let flatpickrConfig = {
-                    enableTime: true,
-                    noCalendar: true,
-                    dateFormat: "H:i",
-                    time_24hr: true,
-                    locale: "id",
-                    allowInput: true,
-                    disableMobile: true      // Mengamankan penampang jam di iOS/Android
-                };
+                    if (bName.includes('siang hari')) {
+                        flatpickrConfig.minTime = "07:00";
+                        flatpickrConfig.maxTime = "17:00";
+                        
+                        // Allow all dates
+                        flatpickr(".form-control[type='date']", {
+                            disable: [
+                                function(date) {
+                                    return (date.getDay() === 4); // 4 = Thursday
+                                }
+                            ],
+                            locale: "id",
+                            dateFormat: "Y-m-d"
+                        });
 
-                const startTimeInput = document.getElementById('start_time');
-                const endTimeInput = document.getElementById('end_time');
-
-                // 4. Kondisi Spesifik Berdasarkan Nama Gedung
-                if (bName.includes('siang hari')) {
-                    flatpickrConfig.minTime = "07:00";
-                    flatpickrConfig.maxTime = "17:00";
-                    
-                    if (startTimeInput && endTimeInput) {
+                        startTimeInput.value = "";
+                        endTimeInput.value = "";
                         startTimeInput.placeholder = "07:00";
                         endTimeInput.placeholder = "17:00";
-                    }
-
-                    // 🔥 HANYA UNTUK SIANG HARI: Filter hari Kamis diaktifkan
-                    datePickerConfig.disable.push(function(date) {
-                        return date.getDay() === 4; // 4 melambangkan hari Kamis
-                    });
-
-                } else if (bName.includes('malam hari')) {
-                    flatpickrConfig.minTime = "18:00";
-                    flatpickrConfig.maxTime = "06:00";
-                    
-                    if (startTimeInput && endTimeInput) {
+                    } else if (bName.includes('malam hari')) {
+                        flatpickrConfig.minTime = "18:00";
+                        flatpickrConfig.maxTime = "06:00";
+                        startTimeInput.value = "";
+                        endTimeInput.value = "";
                         startTimeInput.placeholder = "18:00";
                         endTimeInput.placeholder = "06:00";
-                    }
-                    flatpickrConfig.defaultDate = "18:00";
-                } else {
-                    // Untuk gedung/ruangan lainnya, bersihkan batasan placeholder jam
-                    if (startTimeInput && endTimeInput) {
+                        flatpickrConfig.defaultDate = "18:00";
+                    } else {
                         startTimeInput.placeholder = "--:--";
                         endTimeInput.placeholder = "--:--";
                     }
-                    // Filter hari kamis otomatis kosong ([]), sehingga hari kamis tetap bisa dipilih bebas.
-                }
 
-                // 5. Jalankan Flatpickr secara global ke semua input date dan timepicker
-                flatpickr(".form-control[type='date']", datePickerConfig);
-                flatpickr(".timepicker", flatpickrConfig);
-            });
+                    // Force clear and re-init
+                    flatpickr(".timepicker", flatpickrConfig);
+                });
                 </script>
             <?php endif; ?>
 
@@ -482,7 +512,23 @@ include 'header.php';
                             </div>
                         <?php endif; ?>
 
-                        <p class="text-muted small mb-0"><i class="bi bi-geo-alt me-1"></i> <?= htmlspecialchars($building['location']) ?> • <i class="bi bi-people me-1"></i> Kapasitas <?= $building['capacity'] ?></p>
+                        <p class="text-muted small mb-0">
+                            <i class="bi bi-geo-alt me-1"></i> <?= htmlspecialchars($building['location']) ?> • 
+                            <i class="bi bi-people me-1"></i> Kapasitas <?= $building['capacity'] ?>
+                            <?php if ($building['category'] === 'berbayar'): ?>
+                                • 
+                                <?php 
+                                $rental_label = [
+                                    'per_hari' => 'Per Hari',
+                                    'per_bulan' => 'Per Bulan',
+                                    'per_tahun' => 'Per Tahun'
+                                ];
+                                ?>
+                                <span class="badge bg-primary-subtle text-primary-emphasis fw-bold">
+                                    <?= $rental_label[$building['rental_type']] ?>
+                                </span>
+                            <?php endif; ?>
+                        </p>
                     </div>
                     <div class="card-body">
                         <?php if(!empty($building['requirements'])): ?>
@@ -536,71 +582,97 @@ include 'header.php';
                                     </div>
                                     
                                     <?php 
-                                    $is_atm = stripos($building['name'], 'ATM') !== false;
-                                    if (!$is_atm): 
+                                    $rental_type = $building['rental_type'] ?? 'per_hari';
                                     ?>
                                     <div class="col-12 mt-4">
-                                        <div class="form-check mb-3">
-                                            <input type="checkbox" id="is_multi_day" name="is_multi_day" value="1" class="form-check-input">
-                                            <label class="form-check-label small" for="is_multi_day">
-                                                Booking untuk Beberapa Hari
-                                                <div class="form-text xsmall mt-1"><i>Centang apabila sewa lebih dari 1 (satu) hari.</i></div>
-                                            </label>
-                                        </div>
-                                        
-                                        <div id="single-day-fields" class="row g-3">
-                                            <div class="col-md-4">
-                                                <label class="form-label small fw-medium">Tanggal</label>
-                                                <input type="date" name="booking_date" class="form-control" min="<?= date('Y-m-d', strtotime('+3 days')) ?>">
+                                        <?php if ($rental_type === 'per_tahun'): ?>
+                                            <div class="mb-4">
+                                                <label class="form-label small fw-bold text-secondary">Tahun Sewa</label>
+                                                <select name="booking_year" class="form-select bg-light border-0 py-2 shadow-none" required>
+                                                    <?php 
+                                                    $current_year = date('Y');
+                                                    for ($y = $current_year; $y <= $current_year + 5; $y++): 
+                                                    ?>
+                                                    <option value="<?= $y ?>"><?= $y ?></option>
+                                                    <?php endfor; ?>
+                                                </select>
+                                                <div class="form-text xsmall mt-1"><i>Pilih tahun sewa (harga per tahun).</i></div>
                                             </div>
-                                            <div class="col-md-4">
-                                                <label class="form-label small fw-medium">Jam Mulai</label>
-                                                <div class="input-group">
-                                                    <span class="input-group-text bg-light border-0"><i class="bi bi-clock text-muted"></i></span>
-                                                    <input type="text" name="start_time" id="start_time" class="form-control bg-light border-0 py-2 shadow-none timepicker" placeholder="--:--">
+                                        <?php else: ?>
+                                            <div class="form-check mb-3">
+                                                <input type="checkbox" id="is_multi_day" name="is_multi_day" value="1" class="form-check-input">
+                                                <label class="form-check-label small" for="is_multi_day">
+                                                    <?php if ($rental_type === 'per_bulan'): ?>
+                                                        Booking untuk Beberapa Bulan
+                                                    <?php else: ?>
+                                                        Booking untuk Beberapa Hari
+                                                    <?php endif; ?>
+                                                    <div class="form-text xsmall mt-1">
+                                                        <i>
+                                                            <?php if ($rental_type === 'per_bulan'): ?>
+                                                                Centang apabila sewa lebih dari 1 (satu) bulan.
+                                                            <?php else: ?>
+                                                                Centang apabila sewa lebih dari 1 (satu) hari.
+                                                            <?php endif; ?>
+                                                        </i>
+                                                    </div>
+                                                </label>
+                                            </div>
+                                            
+                                            <div id="single-day-fields" class="row g-3">
+                                                <div class="col-md-4">
+                                                    <label class="form-label small fw-medium">
+                                                        <?php if ($rental_type === 'per_bulan'): ?>
+                                                            Tanggal Mulai
+                                                        <?php else: ?>
+                                                            Tanggal
+                                                        <?php endif; ?>
+                                                    </label>
+                                                    <input type="date" name="booking_date" class="form-control">
                                                 </div>
+                                                <?php if ($rental_type === 'per_hari'): ?>
+                                                    <div class="col-md-4">
+                                                        <label class="form-label small fw-medium">Jam Mulai</label>
+                                                        <div class="input-group">
+                                                            <span class="input-group-text bg-light border-0"><i class="bi bi-clock text-muted"></i></span>
+                                                            <input type="text" name="start_time" id="start_time" class="form-control bg-light border-0 py-2 shadow-none timepicker" placeholder="--:--">
+                                                        </div>
+                                                    </div>
+                                                    <div class="col-md-4">
+                                                       <label class="form-label small fw-medium">Jam Selesai</label>
+                                                        <div class="input-group">
+                                                            <span class="input-group-text bg-light border-0"><i class="bi bi-clock-history text-muted"></i></span>
+                                                            <input type="text" name="end_time" id="end_time" class="form-control bg-light border-0 py-2 shadow-none timepicker" placeholder="--:--">
+                                                        </div>
+                                                    </div>
+                                                <?php endif; ?>
                                             </div>
-                                            <div class="col-md-4">
-                                               <label class="form-label small fw-medium">Jam Selesai</label>
-                                                <div class="input-group">
-                                                    <span class="input-group-text bg-light border-0"><i class="bi bi-clock-history text-muted"></i></span>
-                                                    <input type="text" name="end_time" id="end_time" class="form-control bg-light border-0 py-2 shadow-none timepicker" placeholder="--:--">
-                                                </div>
-                                            </div>
-                                        </div>
 
-                                        <div id="multi-day-fields" class="row g-3 d-none">
-                                            <div class="col-md-4">
-                                                <label class="form-label small fw-bold text-secondary">Tanggal Mulai</label>
-                                                <input type="date" name="date_from" class="form-control" min="<?= date('Y-m-d', strtotime('+3 days')) ?>">
+                                            <div id="multi-day-fields" class="row g-3 d-none">
+                                                <div class="col-md-4">
+                                                    <label class="form-label small fw-bold text-secondary">Tanggal Mulai</label>
+                                                    <input type="date" name="date_from" class="form-control">
+                                                </div>
+                                                <div class="col-md-4">
+                                                    <label class="form-label small fw-bold text-secondary">Tanggal Selesai</label>
+                                                    <input type="date" name="date_to" class="form-control">
+                                                </div>
                                             </div>
-                                            <div class="col-md-4">
-                                                <label class="form-label small fw-bold text-secondary">Tanggal Selesai</label>
-                                                <input type="date" name="date_to" class="form-control" min="<?= date('Y-m-d', strtotime('+3 days')) ?>">
+                                            <div class="form-text xsmall mt-1">
+                                                <i>
+                                                    <?php if ($rental_type === 'per_bulan'): ?>
+                                                        Catatan: Booking lebih dari 1 (satu) bulan tidak membutuhkan jam. Untuk satu bulan, hanya butuh tanggal mulai.
+                                                    <?php else: ?>
+                                                        Catatan: Booking lebih dari 1 (satu) hari tidak membutuhkan jam. Untuk satu hari, jam wajib diisi.
+                                                    <?php endif; ?>
+                                                </i>
                                             </div>
-                                        </div>
-                                        <div class="form-text xsmall mt-1"><i>Catatan: Booking lebih dari 1 (satu) hari tidak membutuhkan jam. Untuk satu hari, jam wajib diisi.</i></div>
+                                        <?php endif; ?>
                                     </div>
-                                    <?php else: ?>
-                                    <div class="col-12 mt-4">
-                                        <div class="mb-4">
-                                            <label class="form-label small fw-bold text-secondary">Tahun Sewa</label>
-                                            <select name="booking_year" class="form-select bg-light border-0 py-2 shadow-none" required>
-                                                <?php 
-                                                $current_year = date('Y');
-                                                for ($y = $current_year; $y <= $current_year + 5; $y++): 
-                                                ?>
-                                                <option value="<?= $y ?>"><?= $y ?></option>
-                                                <?php endfor; ?>
-                                            </select>
-                                            <div class="form-text xsmall mt-1"><i>Pilih tahun sewa Ruang ATM (harga per tahun).</i></div>
-                                        </div>
-                                    </div>
-                                    <?php endif; ?>
                                 </div>
                             </div>
 
-                            <?php if (trim($building['name']) !== 'Ruang Rapat Sekretariat Daerah Kab. Hulu Sungai Tengah' && $building['category'] !== 'gratis' && !$is_atm): ?>
+                            <?php if (trim($building['name']) !== 'Ruang Rapat Sekretariat Daerah Kab. Hulu Sungai Tengah' && $building['category'] !== 'gratis' && $rental_type === 'per_hari'): ?>
                             <div class="mb-4">
                                 <h6 class="fw-bold text-dark border-bottom pb-2 mb-3">Tambah Fasilitas Pendukung</h6>
                                 <div class="list-group">
@@ -702,10 +774,10 @@ document.addEventListener('DOMContentLoaded', function() {
         const eventDesc = document.querySelector('textarea[name="event_description"]')?.value;
         const proposalFile = document.querySelector('input[name="proposal_file"]')?.files[0]?.name;
 
-        const isAtm = "<?= stripos($building['name'] ?? '', 'ATM') !== false ? '1' : '0' ?>";
+        const rentalType = "<?= $building['rental_type'] ?? 'per_hari' ?>";
         
         let dateInfo = '';
-        if (isAtm === '1') {
+        if (rentalType === 'per_tahun') {
             const bookingYear = document.querySelector('select[name="booking_year"]')?.value;
             dateInfo = `<strong>Tahun Sewa:</strong> ${bookingYear}`;
         } else {
@@ -713,13 +785,28 @@ document.addEventListener('DOMContentLoaded', function() {
             if (isMultiDay) {
                 const dateFrom = document.querySelector('input[name="date_from"]')?.value;
                 const dateTo = document.querySelector('input[name="date_to"]')?.value;
-                dateInfo = `<strong>Tanggal:</strong> ${formatDateIndo(dateFrom)} s.d ${formatDateIndo(dateTo)} (${Math.ceil((new Date(dateTo) - new Date(dateFrom)) / (1000 * 60 * 60 * 24)) + 1} hari)`;
+                if (rentalType === 'per_bulan') {
+                    // Calculate number of months
+                    const start = new Date(dateFrom);
+                    const end = new Date(dateTo);
+                    let months = (end.getFullYear() - start.getFullYear()) * 12;
+                    months += end.getMonth() - start.getMonth();
+                    if (end.getDate() > start.getDate()) months += 1;
+                    if (months === 0) months = 1;
+                    dateInfo = `<strong>Tanggal:</strong> ${formatDateIndo(dateFrom)} s.d ${formatDateIndo(dateTo)} (${months} bulan)`;
+                } else {
+                    dateInfo = `<strong>Tanggal:</strong> ${formatDateIndo(dateFrom)} s.d ${formatDateIndo(dateTo)} (${Math.ceil((new Date(dateTo) - new Date(dateFrom)) / (1000 * 60 * 60 * 24)) + 1} hari)`;
+                }
             } else {
                 const bookingDate = document.querySelector('input[name="booking_date"]')?.value;
-                const startTime = document.querySelector('input[name="start_time"]')?.value;
-                const endTime = document.querySelector('input[name="end_time"]')?.value;
-                dateInfo = `<strong>Tanggal:</strong> ${formatDateIndo(bookingDate)}<br>`;
-                dateInfo += `<strong>Waktu:</strong> ${startTime} WITA s.d ${endTime} WITA`;
+                if (rentalType === 'per_bulan') {
+                    dateInfo = `<strong>Tanggal Mulai:</strong> ${formatDateIndo(bookingDate)} (1 bulan)`;
+                } else {
+                    const startTime = document.querySelector('input[name="start_time"]')?.value;
+                    const endTime = document.querySelector('input[name="end_time"]')?.value;
+                    dateInfo = `<strong>Tanggal:</strong> ${formatDateIndo(bookingDate)}<br>`;
+                    dateInfo += `<strong>Waktu:</strong> ${startTime} WITA s.d ${endTime} WITA`;
+                }
             }
         }
 
@@ -753,7 +840,7 @@ document.addEventListener('DOMContentLoaded', function() {
             `;
 
         // Add items if applicable
-        if (!isAtm && "<?= trim($building['name'] ?? '') !== 'Ruang Rapat Sekretariat Daerah Kab. Hulu Sungai Tengah' && $building['category'] !== 'gratis' ? '1' : '0' ?>" === '1') {
+        if (rentalType === 'per_hari' && "<?= trim($building['name'] ?? '') !== 'Ruang Rapat Sekretariat Daerah Kab. Hulu Sungai Tengah' && $building['category'] !== 'gratis' ? '1' : '0' ?>" === '1') {
             let hasItems = false;
             let itemsHTML = `
                 <div class="col-12">
