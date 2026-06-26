@@ -697,7 +697,7 @@ include 'header.php';
                             <?php endif; ?>
 
                             <div class="mt-4">
-                                <button type="button" class="btn btn-primary w-100 py-2 fw-bold" data-bs-toggle="modal" data-bs-target="#bookingSummaryModal">
+                                <button type="button" id="openSummaryBtn" class="btn btn-primary w-100 py-2 fw-bold">
                                     Ajukan Booking
                                 </button>
                                 <a href="index.php" class="btn btn-link w-100 mt-2 text-secondary text-decoration-none small">Kembali ke Beranda</a>
@@ -717,7 +717,6 @@ include 'header.php';
 </div>
 
 <?php if ($building): ?>
-<!-- Modal Ringkasan Booking -->
 <div class="modal fade" id="bookingSummaryModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="false">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content border-0 shadow">
@@ -740,12 +739,117 @@ include 'header.php';
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+    // === 1. SELEKTOR & VARIABEL UTAMA ===
+    const buildingName = "<?= htmlspecialchars(trim($building['name'] ?? '')) ?>";
+    const bName = buildingName.toLowerCase();
+    const rentalType = "<?= $building['rental_type'] ?? 'per_hari' ?>";
+
     const bookingForm = document.querySelector('form[enctype="multipart/form-data"]');
-    const summaryModal = new bootstrap.Modal(document.getElementById('bookingSummaryModal'));
+    const summaryModalElement = document.getElementById('bookingSummaryModal');
     const summaryContent = document.getElementById('summaryContent');
     const confirmBookingBtn = document.getElementById('confirmBookingBtn');
+    const openSummaryBtn = document.getElementById('openSummaryBtn');
+    
+    // Inisialisasi Object Modal Bootstrap secara manual
+    let summaryModal = null;
+    if (summaryModalElement) {
+        summaryModal = new bootstrap.Modal(summaryModalElement);
+    }
 
-    // Format date Indonesia
+    var cb = document.getElementById('is_multi_day');
+    var single = document.getElementById('single-day-fields');
+    var multi = document.getElementById('multi-day-fields');
+    
+    // === 2. LOGIKA SINKRONISASI TAMPILAN FIELD FORM ===
+    function sync() {
+        if (cb) {
+            if (cb.checked) {
+                multi.classList.remove('d-none');
+                single.classList.add('d-none');
+                single.querySelectorAll('input').forEach(i => i.required = false);
+                multi.querySelectorAll('input').forEach(i => i.required = true);
+            } else {
+                multi.classList.add('d-none');
+                single.classList.remove('d-none');
+                single.querySelectorAll('input').forEach(i => i.required = true);
+                multi.querySelectorAll('input').forEach(i => i.required = false);
+            }
+        }
+    }
+    if(cb) cb.addEventListener('change', sync);
+    sync();
+
+    // === 3. PERSAPAN INPUT DATE UNTUK FLATPICKR ===
+    document.querySelectorAll(".form-control[type='date']").forEach(function(element) {
+        element.type = "text"; 
+        element.placeholder = "Pilih Tanggal...";
+    });
+
+    // === 4. KONFIGURASI FLATPICKR (H-3 & BLOKIR KAMIS KONDISIONAL) ===
+    const minBookingDate = new Date();
+    minBookingDate.setHours(0, 0, 0, 0);
+    minBookingDate.setDate(minBookingDate.getDate() + 3);
+
+    let datePickerConfig = {
+        minDate: minBookingDate, 
+        locale: "id",
+        dateFormat: "Y-m-d",
+        disableMobile: true,
+        disable: [
+            function(date) {
+                date.setHours(0, 0, 0, 0);
+                return date < minBookingDate;
+            }
+        ]
+    };
+
+    let flatpickrConfig = {
+        enableTime: true,
+        noCalendar: true,
+        dateFormat: "H:i",
+        time_24hr: true,
+        locale: "id",
+        allowInput: true,
+        disableMobile: true
+    };
+
+    const startTimeInput = document.getElementById('start_time');
+    const endTimeInput = document.getElementById('end_time');
+
+    if (bName.includes('siang hari')) {
+        flatpickrConfig.minTime = "07:00";
+        flatpickrConfig.maxTime = "17:00";
+        if (startTimeInput && endTimeInput) {
+            startTimeInput.placeholder = "07:00";
+            endTimeInput.placeholder = "17:00";
+        }
+        datePickerConfig.disable = [
+            function(date) {
+                date.setHours(0, 0, 0, 0);
+                return (date < minBookingDate) || (date.getDay() === 4);
+            }
+        ];
+    } else if (bName.includes('malam hari')) {
+        flatpickrConfig.minTime = "18:00";
+        flatpickrConfig.maxTime = "06:00";
+        if (startTimeInput && endTimeInput) {
+            startTimeInput.placeholder = "18:00";
+            endTimeInput.placeholder = "06:00";
+        }
+        flatpickrConfig.defaultDate = "18:00";
+    } else {
+        if (startTimeInput && endTimeInput) {
+            startTimeInput.placeholder = "--:--";
+            endTimeInput.placeholder = "--:--";
+        }
+    }
+
+    flatpickr(".form-control[name='booking_date'], .form-control[name='date_from'], .form-control[name='date_to']", datePickerConfig);
+    if (rentalType === 'per_hari') {
+        flatpickr(".timepicker", flatpickrConfig);
+    }
+
+    // === 5. FORMATTER DATA RINGKASAN ===
     function formatDateIndo(dateStr) {
         if (!dateStr) return '';
         const date = new Date(dateStr);
@@ -753,101 +857,98 @@ document.addEventListener('DOMContentLoaded', function() {
         return date.toLocaleDateString('id-ID', options);
     }
 
-    // Format number Indonesia
     function formatNumber(num) {
         return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.');
     }
 
-    // Populate summary content when modal is shown
-    document.querySelector('[data-bs-target="#bookingSummaryModal"]').addEventListener('click', function() {
-        let summaryHTML = '';
-        
-        // Get building info
-        const buildingName = "<?= htmlspecialchars($building['name'] ?? '') ?>";
-        
-        // Get form values
-        const bookerName = document.querySelector('input[name="booker_name"]')?.value;
-        const bookerPhone = document.querySelector('input[name="booker_phone"]')?.value;
-        const bookerEmail = document.querySelector('input[name="booker_email"]')?.value;
-        const organization = document.querySelector('input[name="organization"]')?.value;
-        const eventName = document.querySelector('input[name="event_name"]')?.value;
-        const eventDesc = document.querySelector('textarea[name="event_description"]')?.value;
-        const proposalFile = document.querySelector('input[name="proposal_file"]')?.files[0]?.name;
+    // === 6. PROSES EKSTRAKSI DATA FORM KE MODAL RINGKASAN ===
+    if (openSummaryBtn) {
+        openSummaryBtn.addEventListener('click', function() {
+            // Validasi kelengkapan form input (required HTML5 validation) sebelum modal tampil
+            if (!bookingForm.checkValidity()) {
+                bookingForm.reportValidity();
+                return;
+            }
 
-        const rentalType = "<?= $building['rental_type'] ?? 'per_hari' ?>";
-        
-        let dateInfo = '';
-        if (rentalType === 'per_tahun') {
-            const bookingYear = document.querySelector('select[name="booking_year"]')?.value;
-            dateInfo = `<strong>Tahun Sewa:</strong> ${bookingYear}`;
-        } else {
-            const isMultiDay = document.getElementById('is_multi_day')?.checked;
-            if (isMultiDay) {
-                const dateFrom = document.querySelector('input[name="date_from"]')?.value;
-                const dateTo = document.querySelector('input[name="date_to"]')?.value;
-                if (rentalType === 'per_bulan') {
-                    // Calculate number of months
-                    const start = new Date(dateFrom);
-                    const end = new Date(dateTo);
-                    let months = (end.getFullYear() - start.getFullYear()) * 12;
-                    months += end.getMonth() - start.getMonth();
-                    if (end.getDate() > start.getDate()) months += 1;
-                    if (months === 0) months = 1;
-                    dateInfo = `<strong>Tanggal:</strong> ${formatDateIndo(dateFrom)} s.d ${formatDateIndo(dateTo)} (${months} bulan)`;
-                } else {
-                    dateInfo = `<strong>Tanggal:</strong> ${formatDateIndo(dateFrom)} s.d ${formatDateIndo(dateTo)} (${Math.ceil((new Date(dateTo) - new Date(dateFrom)) / (1000 * 60 * 60 * 24)) + 1} hari)`;
-                }
+            let summaryHTML = '';
+            
+            const bookerName = document.querySelector('input[name="booker_name"]')?.value;
+            const bookerPhone = document.querySelector('input[name="booker_phone"]')?.value;
+            const bookerEmail = document.querySelector('input[name="booker_email"]')?.value;
+            const organization = document.querySelector('input[name="organization"]')?.value;
+            const eventName = document.querySelector('input[name="event_name"]')?.value;
+            const eventDesc = document.querySelector('textarea[name="event_description"]')?.value;
+            const proposalFile = document.querySelector('input[name="proposal_file"]')?.files[0]?.name;
+            
+            let dateInfo = '';
+            if (rentalType === 'per_tahun') {
+                const bookingYear = document.querySelector('select[name="booking_year"]')?.value;
+                dateInfo = `<strong>Tahun Sewa:</strong> ${bookingYear}`;
             } else {
-                const bookingDate = document.querySelector('input[name="booking_date"]')?.value;
-                if (rentalType === 'per_bulan') {
-                    dateInfo = `<strong>Tanggal Mulai:</strong> ${formatDateIndo(bookingDate)} (1 bulan)`;
+                const isMultiDay = document.getElementById('is_multi_day')?.checked;
+                if (isMultiDay) {
+                    const dateFrom = document.querySelector('input[name="date_from"]')?.value;
+                    const dateTo = document.querySelector('input[name="date_to"]')?.value;
+                    if (rentalType === 'per_bulan') {
+                        const start = new Date(dateFrom);
+                        const end = new Date(dateTo);
+                        let months = (end.getFullYear() - start.getFullYear()) * 12;
+                        months += end.getMonth() - start.getMonth();
+                        if (end.getDate() > start.getDate()) months += 1;
+                        if (months === 0) months = 1;
+                        dateInfo = `<strong>Tanggal:</strong> ${formatDateIndo(dateFrom)} s.d ${formatDateIndo(dateTo)} (${months} bulan)`;
+                    } else {
+                        dateInfo = `<strong>Tanggal:</strong> ${formatDateIndo(dateFrom)} s.d ${formatDateIndo(dateTo)} (${Math.ceil((new Date(dateTo) - new Date(dateFrom)) / (1000 * 60 * 60 * 24)) + 1} hari)`;
+                    }
                 } else {
-                    const startTime = document.querySelector('input[name="start_time"]')?.value;
-                    const endTime = document.querySelector('input[name="end_time"]')?.value;
-                    dateInfo = `<strong>Tanggal:</strong> ${formatDateIndo(bookingDate)}<br>`;
-                    dateInfo += `<strong>Waktu:</strong> ${startTime} WITA s.d ${endTime} WITA`;
+                    const bookingDate = document.querySelector('input[name="booking_date"]')?.value;
+                    if (rentalType === 'per_bulan') {
+                        dateInfo = `<strong>Tanggal Mulai:</strong> ${formatDateIndo(bookingDate)} (1 bulan)`;
+                    } else {
+                        const startTime = document.querySelector('input[name="start_time"]')?.value;
+                        const endTime = document.querySelector('input[name="end_time"]')?.value;
+                        dateInfo = `<strong>Tanggal:</strong> ${formatDateIndo(bookingDate)}<br>`;
+                        dateInfo += `<strong>Waktu:</strong> ${startTime} WITA s.d ${endTime} WITA`;
+                    }
                 }
             }
-        }
 
-        // Build summary
-        summaryHTML = `
-            <div class="row g-3">
-                <div class="col-12">
-                    <div class="fw-bold text-primary mb-3">📍 ${buildingName}</div>
-                </div>
-                <div class="col-12">
-                    <div class="border-bottom pb-2 mb-2">
-                        <strong class="text-dark">📋 Informasi Peminjam</strong>
+            summaryHTML = `
+                <div class="row g-3">
+                    <div class="col-12">
+                        <div class="fw-bold text-primary mb-3">📍 ${buildingName}</div>
                     </div>
-                    <div class="small">
-                        <div class="mb-1"><strong>Nama:</strong> ${bookerName || '-'}</div>
-                        <div class="mb-1"><strong>No. HP:</strong> ${bookerPhone || '-'}</div>
-                        <div class="mb-1"><strong>Email:</strong> ${bookerEmail || '-'}</div>
-                        <div class="mb-1"><strong>Organisasi:</strong> ${organization || '-'}</div>
+                    <div class="col-12">
+                        <div class="border-bottom pb-2 mb-2">
+                            <strong class="text-dark">📋 Informasi Peminjam</strong>
+                        </div>
+                        <div class="small">
+                            <div class="mb-1"><strong>Nama:</strong> ${bookerName || '-'}</div>
+                            <div class="mb-1"><strong>No. HP:</strong> ${bookerPhone || '-'}</div>
+                            <div class="mb-1"><strong>Email:</strong> ${bookerEmail || '-'}</div>
+                            <div class="mb-1"><strong>Organisasi:</strong> ${organization || '-'}</div>
+                        </div>
                     </div>
-                </div>
-                <div class="col-12">
-                    <div class="border-bottom pb-2 mb-2">
-                        <strong class="text-dark">🎪 Detail Acara</strong>
+                    <div class="col-12">
+                        <div class="border-bottom pb-2 mb-2">
+                            <strong class="text-dark">🎪 Detail Acara</strong>
+                        </div>
+                        <div class="small">
+                            <div class="mb-1"><strong>Nama Acara:</strong> ${eventName || '-'}</div>
+                            <div class="mb-1"><strong>Deskripsi:</strong> ${eventDesc || '-'}</div>
+                            <div class="mb-1">${dateInfo}</div>
+                        </div>
                     </div>
-                    <div class="small">
-                        <div class="mb-1"><strong>Nama Acara:</strong> ${eventName || '-'}</div>
-                        <div class="mb-1"><strong>Deskripsi:</strong> ${eventDesc || '-'}</div>
-                        <div class="mb-1">${dateInfo}</div>
-                    </div>
-                </div>
             `;
 
-        // Add items if applicable
-        if (rentalType === 'per_hari' && "<?= trim($building['name'] ?? '') !== 'Ruang Rapat Sekretariat Daerah Kab. Hulu Sungai Tengah' && $building['category'] !== 'gratis' ? '1' : '0' ?>" === '1') {
-            let hasItems = false;
-            let itemsHTML = `
-                <div class="col-12">
-                    <div class="border-bottom pb-2 mb-2">
-                        <strong class="text-dark">🛠️ Fasilitas Pendukung</strong>
-                    </div>
-                    <div class="small">
+            if (rentalType === 'per_hari' && "<?= trim($building['name'] ?? '') !== 'Ruang Rapat Sekretariat Daerah Kab. Hulu Sungai Tengah' && $building['category'] !== 'gratis' ? '1' : '0' ?>" === '1') {
+                let hasItems = false;
+                let itemsHTML = `
+                    <div class="col-12">
+                        <div class="border-bottom pb-2 mb-2">
+                            <strong class="text-dark">🛠️ Fasilitas Pendukung</strong>
+                        </div>
+                        <div class="small">
                 `;
                 <?php foreach($available_items as $item): ?>
                     const item<?= $item['id'] ?> = document.querySelector('input[name="items[<?= $item['id'] ?>]"]')?.value;
@@ -860,27 +961,33 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (hasItems) {
                     summaryHTML += itemsHTML;
                 }
-        }
+            }
 
-        if (proposalFile) {
-            summaryHTML += `
-                <div class="col-12">
-                    <div class="border-bottom pb-2 mb-2">
-                        <strong class="text-dark">📄 Dokumen</strong>
+            if (proposalFile) {
+                summaryHTML += `
+                    <div class="col-12">
+                        <div class="border-bottom pb-2 mb-2">
+                            <strong class="text-dark">📄 Dokumen</strong>
+                        </div>
+                        <div class="small"><i class="bi bi-file-earmark-check me-1 text-success"></i>${proposalFile}</div>
                     </div>
-                    <div class="small"><i class="bi bi-file-earmark-check me-1 text-success"></i>${proposalFile}</div>
-                </div>
-            `;
-        }
+                `;
+            }
 
-        summaryHTML += '</div>';
-        summaryContent.innerHTML = summaryHTML;
-    });
+            summaryHTML += '</div>';
+            summaryContent.innerHTML = summaryHTML;
+            
+            // Tampilkan modal secara aman setelah data dimuat ke DOM ringkasan
+            if (summaryModal) summaryModal.show();
+        });
+    }
 
-    // Submit form when confirm button is clicked
-    confirmBookingBtn.addEventListener('click', function() {
-        bookingForm.submit();
-    });
+    // === 7. EKSEKUSI PENYIMPANAN FORM DATABASE ===
+    if (confirmBookingBtn && bookingForm) {
+        confirmBookingBtn.addEventListener('click', function() {
+            bookingForm.submit();
+        });
+    }
 });
 </script>
 <?php endif; ?>

@@ -9,7 +9,7 @@ if ($invoice_id) {
         SELECT 
             i.id as invoice_id, i.amount, i.status as invoice_status, i.created_at as invoice_date,
             b.id as booking_id, b.event_name, b.booking_date, b.start_time, b.end_time,
-            bu.name as building_name, bu.description, bu.rental_type,
+            bu.id as building_id, bu.name as building_name, bu.description, bu.rental_type,
             bk.booker_name, bk.booker_email, bk.organization
         FROM invoices i
         JOIN bookings b ON i.booking_id = b.id
@@ -37,6 +37,26 @@ if ($invoice['booking_id']) {
     $itemsStmt->execute([$invoice['booking_id']]);
     $booking_items = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
 }
+
+// 🔥 PERBAIKAN UTAMA: Menggunakan array $invoice hasil query di atas, bukan $booking
+$group_stmt = $pdo->prepare("
+    SELECT booking_date FROM bookings 
+    WHERE event_name = ? 
+    AND booker_name = ? 
+    AND building_id = ?
+    ORDER BY booking_date ASC
+");
+$group_stmt->execute([$invoice['event_name'], $invoice['booker_name'], $invoice['building_id']]);
+$group_bookings = $group_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+$is_multi_day = count($group_bookings) > 1;
+$group_dates = [];
+foreach ($group_bookings as $gb) {
+    $group_dates[] = $gb['booking_date'];
+}
+
+$group_start_date = $group_dates[0] ?? $invoice['booking_date'];
+$group_end_date = $group_dates[count($group_dates)-1] ?? $invoice['booking_date'];
 ?>
 
 <!DOCTYPE html>
@@ -45,10 +65,7 @@ if ($invoice['booking_id']) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Invoice #<?= htmlspecialchars($invoice['invoice_id']) ?></title>
-
-<!-- Favicon -->
     <link rel="icon" type="image/png" href="assets/favicon.png">
-
     <style>
         body {
             font-family: 'Courier New', Courier, monospace;
@@ -106,6 +123,7 @@ if ($invoice['booking_id']) {
         .item-sub {
             font-size: 11px;
             color: #333;
+            margin-top: 2px;
         }
         .total-row {
             display: flex;
@@ -196,8 +214,17 @@ if ($invoice['booking_id']) {
                     'per_bulan' => 'Per Bulan',
                     'per_tahun' => 'Per Tahun'
                 ];
+                $label_sewa = $rental_label[$invoice['rental_type']] ?? 'Per Hari';
                 ?>
-                Tipe Sewa: <?= $rental_label[$invoice['rental_type']] ?> | <?= date('d M Y', strtotime($invoice['booking_date'])) ?>
+                
+                <?php if ($is_multi_day): ?>
+                    Tipe Sewa: <?= $label_sewa ?> | <?= date('d M Y', strtotime($group_start_date)) ?> s.d <?= date('d M Y', strtotime($group_end_date)) ?>
+                <?php else: ?>
+                    Tipe Sewa: <?= $label_sewa ?> | <?= date('d M Y', strtotime($invoice['booking_date'])) ?>
+                    <?php if ($invoice['rental_type'] === 'per_hari'): ?>
+                        (<?= date('H:i', strtotime($invoice['start_time'])) ?> - <?= date('H:i', strtotime($invoice['end_time'])) ?> WITA)
+                    <?php endif; ?>
+                <?php endif; ?>
             </div>
         </div>
         <?php endif; ?>
@@ -249,18 +276,16 @@ function saveAsPDF() {
     const element = document.querySelector('.receipt');
     const invoiceId = '<?= str_pad($invoice['invoice_id'], 6, '0', STR_PAD_LEFT) ?>';
     
-    // Opsi konfigurasi untuk html2pdf
     const opt = {
         margin: 0,
         filename: 'Invoice-' + invoiceId + '.pdf',
         image: { type: 'jpeg', quality: 0.98 },
         html2canvas: { scale: 2, useCORS: true, logging: false },
-        jsPDF: { unit: 'mm', format: [80, 250], orientation: 'portrait' } // Ukuran 80mm lebar
+        jsPDF: { unit: 'mm', format: [80, 260], orientation: 'portrait' } 
     };
 
-    // Jalankan konversi
     html2pdf().set(opt).from(element).toPdf().get('pdf').then(function (pdf) {
-        // Otomatis download
+        // Pemrosesan PDF selesai
     }).save();
 }
 </script>
