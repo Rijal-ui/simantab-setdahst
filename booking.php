@@ -292,6 +292,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             $pdo->commit();
+            // === PENGATURAN NOTIFIKASI WHATSAPP KE ADMIN ===
+            
+            // 1. Tentukan Nomor WhatsApp Admin di sini (Gunakan format 62...)
+            $wa_admin = "6285346042831";
+
+            // 2. Olah Variabel Tanggal & Waktu sesuai input user
+            $nama_gedung = $building['name'] ?? '-';
+            $pemohon_org = $booker_name . " / " . ($organization ?: '-');
+            
+            // Logika Tanggal
+            if ($rental_type === 'per_tahun') {
+                $tanggal_acara = "Tahun Sewa " . $_POST['booking_year'];
+                $waktu_acara   = "Full Day (Per Tahun)";
+            } else if ($is_multi_day) {
+                $tanggal_acara = date('d-m-Y', strtotime($date_from)) . " s.d " . date('d-m-Y', strtotime($date_to));
+                $waktu_acara   = "Full Day";
+            } else {
+                $tanggal_acara = date('d-m-Y', strtotime($booking_date));
+                $waktu_acara   = ($rental_type === 'per_hari') ? $start_time_use . " s.d " . $end_time_use . " WITA" : "Full Day";
+            }
+
+            // 3. Susun Template Pesan Sesuai Permintaan Anda
+            $wa_message = "Halo Admin SI MANTAB BMD, ada permohonan baru untuk peminjaman/booking gedung! Berikut adalah data pemohon yang masuk:\n";
+            $wa_message .= "• 🏢 *Nama Gedung* : " . $nama_gedung . "\n";
+            $wa_message .= "• 👤 *Nama Pemohon/Organisasi/Instansi* : " . $pemohon_org . "\n";
+            $wa_message .= "• ☎️ *Kontak* : " . $booker_phone . "\n";
+            $wa_message .= "• 📅 *Tanggal Acara* : " . $tanggal_acara . "\n";
+            $wa_message .= "• 🕒 *Waktu Acara* : " . $waktu_acara . "\n";
+            $wa_message .= "• 📝 *Keperluan Acara* : " . ($event_name ?: '-') . "\n\n";
+            $wa_message .= "Mohon bantuannya untuk dilakukan pengecekan ketersediaan jadwal dan verifikasi data pemohon. Terima kasih.";
+
+            // 4. Tembak API Otomatis ke Nomor Admin
+            sendWhatsAppNotification($wa_admin, $wa_message);
+            
+            // ===============================================
         } catch (Exception $ex) {
             $pdo->rollBack();
             $error = $ex->getMessage();
@@ -300,6 +335,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = "Terjadi kesalahan: " . $e->getMessage();
         }
     }
+}
+
+function sendWhatsAppNotification($to, $message) {
+    // Membersihkan format nomor agar hanya angka dan berawalan kode negara (62)
+    $to = preg_replace('/[^0-9]/', '', $to);
+    if (strpos($to, '0') === 0) {
+        $to = '62' . substr($to, 1);
+    }
+
+    $url = 'http://103.148.17.55:3011/send';
+    
+    $payload = json_encode([
+        'to' => $to,
+        'message' => $message
+    ]);
+
+    $ch = curl_init($url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, $payload);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        'Content-Type: application/json',
+        'Content-Length: ' . strlen($payload)
+    ]);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 10); 
+
+    $response = curl_exec($ch);
+    curl_close($ch);
+    
+    return $response;
 }
 
 include 'header.php';
