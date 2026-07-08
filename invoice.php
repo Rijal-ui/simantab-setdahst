@@ -38,7 +38,7 @@ if ($invoice['booking_id']) {
     $booking_items = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
-// 🔥 PERBAIKAN UTAMA: Menggunakan array $invoice hasil query di atas, bukan $booking
+// Mengambil data grup booking jika dilakukan pemesanan beberapa hari
 $group_stmt = $pdo->prepare("
     SELECT booking_date FROM bookings 
     WHERE event_name = ? 
@@ -79,8 +79,9 @@ $group_end_date = $group_dates[count($group_dates)-1] ?? $invoice['booking_date'
             width: 80mm;
             margin: 20px auto;
             background: #fff;
-            padding: 10px;
+            padding: 10px 15px;
             box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            box-sizing: border-box;
         }
         .header {
             text-align: center;
@@ -90,61 +91,90 @@ $group_end_date = $group_dates[count($group_dates)-1] ?? $invoice['booking_date'
             font-size: 18px;
             margin: 0;
             text-transform: uppercase;
+            letter-spacing: 1px;
         }
         .header p {
             margin: 2px 0;
         }
         .divider {
             border-top: 1px dashed #000;
-            margin: 10px 0;
+            margin: 8px 0;
         }
         .info-row {
             display: flex;
             justify-content: space-between;
-            margin: 2px 0;
+            margin: 3px 0;
         }
         .section-title {
             font-weight: bold;
             text-transform: uppercase;
-            margin-top: 10px;
+            margin-top: 8px;
+            margin-bottom: 4px;
             display: block;
         }
         .item-details {
             margin-top: 5px;
         }
         .item-row {
-            margin-bottom: 5px;
+            margin-bottom: 8px;
         }
         .item-main {
             display: flex;
             justify-content: space-between;
+            align-items: flex-start;
             font-weight: bold;
+        }
+        .item-main span:first-child {
+            max-width: 70%;
+            text-align: left;
+        }
+        .item-main span:last-child {
+            text-align: right;
+            white-space: nowrap;
         }
         .item-sub {
             font-size: 11px;
-            color: #333;
+            color: #444;
             margin-top: 2px;
         }
         .total-row {
             display: flex;
             justify-content: space-between;
             font-weight: bold;
-            font-size: 14px;
-            margin-top: 10px;
+            font-size: 13px;
+            margin-top: 8px;
+        }
+        .qris-container {
+            text-align: center;
+            margin: 10px 0 5px 0;
+        }
+        .qris-image {
+            width: 60mm;
+            height: auto;
+            display: inline-block;
         }
         .status-stamp {
-            border: 2px solid #000;
+            border: 1px solid #000;
             display: inline-block;
-            padding: 5px 20px;
+            padding: 6px 25px;
             font-weight: bold;
-            font-size: 16px;
-            margin: 15px 0;
+            font-size: 14px;
+            margin: 5px 0 10px 0;
             text-transform: uppercase;
+        }
+        .status-paid {
+            border-color: #000;
+            color: #000;
+        }
+        .status-unpaid {
+            border-color: #ccc;
+            color: #ccc;
         }
         .footer {
             text-align: center;
-            margin-top: 15px;
+            margin-top: 10px;
             font-size: 11px;
+            line-height: 1.4;
         }
         @media print {
             body {
@@ -152,9 +182,9 @@ $group_end_date = $group_dates[count($group_dates)-1] ?? $invoice['booking_date'
             }
             .receipt {
                 width: 80mm;
-                margin: 0;
+                margin: 0 auto;
                 box-shadow: none;
-                padding: 5px;
+                padding: 10px 5px;
             }
             .no-print {
                 display: none;
@@ -183,7 +213,7 @@ $group_end_date = $group_dates[count($group_dates)-1] ?? $invoice['booking_date'
     <div class="divider"></div>
 
     <span class="section-title">DITAGIHKAN KEPADA</span>
-    <p style="margin: 2px 0;"><?= htmlspecialchars($invoice['booker_name']) ?></p>
+    <p style="margin: 2px 0; font-weight: bold;"><?= htmlspecialchars($invoice['booker_name']) ?></p>
     <p style="margin: 2px 0;"><?= htmlspecialchars($invoice['organization'] ?: '-') ?></p>
     <p style="margin: 2px 0;"><?= htmlspecialchars($invoice['booker_email']) ?></p>
 
@@ -248,18 +278,24 @@ $group_end_date = $group_dates[count($group_dates)-1] ?? $invoice['booking_date'
 
     <div class="divider"></div>
 
+    <div class="qris-container">
+        <img src="assets/qris.jpeg" alt="QRIS Retribusi" class="qris-image">
+    </div>
+
     <div style="text-align: center;">
         <?php if ($invoice['invoice_status'] == 'paid'): ?>
-            <div class="status-stamp">LUNAS</div>
+            <div class="status-stamp status-paid">LUNAS</div>
         <?php else: ?>
-            <div class="status-stamp" style="border-color: #ccc; color: #ccc;">BELUM BAYAR</div>
+            <div class="status-stamp status-unpaid">BELUM BAYAR</div>
         <?php endif; ?>
     </div>
 
     <div class="divider"></div>
 
     <div class="footer">
-        Silakan lakukan pembayaran ke no rekening BANK KALSEL 3208129286 a.n SEWA TANAH BANGUNAN PERUMAHAN/GEDUNG TEMPAT TINGGAL<br>
+        Silakan lakukan pembayaran dengan cara scan QRIS diatas atau transfer ke nomor rekening<br>
+        BANK KALSEL 3207675465<br>
+        a.n. QRIS PENYEWAAN TANAH DAN BANGUNAN<br>
         Konfirmasi ke nomor 0853-4604-2831<br>
         Terima kasih atas kepercayaan Anda
     </div>
@@ -274,18 +310,18 @@ $group_end_date = $group_dates[count($group_dates)-1] ?? $invoice['booking_date'
 <script>
 function saveAsPDF() {
     const element = document.querySelector('.receipt');
-    const invoiceId = '<?= str_pad($invoice['invoice_id'], 6, '0', STR_PAD_LEFT) ?>';
+    const invoiceId = '<?= htmlspecialchars($invoice['invoice_id']) ?>';
     
     const opt = {
         margin: 0,
         filename: 'Invoice-' + invoiceId + '.pdf',
         image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true, logging: false },
-        jsPDF: { unit: 'mm', format: [80, 260], orientation: 'portrait' } 
+        html2canvas: { scale: 3, useCORS: true, logging: false },
+        jsPDF: { unit: 'mm', format: [80, 270], orientation: 'portrait' } 
     };
 
     html2pdf().set(opt).from(element).toPdf().get('pdf').then(function (pdf) {
-        // Pemrosesan PDF selesai
+        // Selesai
     }).save();
 }
 </script>
