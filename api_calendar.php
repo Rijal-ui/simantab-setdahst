@@ -60,8 +60,8 @@ try {
             'id' => 'zumba_recurring',
             'title' => '🔒 RUTIN: Senam Gratis Bersama Ketua TP PKK Kab. HST',
             'daysOfWeek' => [4], // 4 = Thursday
-            'startTime' => '07:00:00',
-            'endTime' => '17:00:00',
+            'startTime' => '15:00:00',
+            'endTime' => '18:00:00',
             'backgroundColor' => '#f97316', // Orange color
             'borderColor' => '#ea580c',
             'textColor' => '#ffffff',
@@ -70,7 +70,7 @@ try {
                 'building_name' => $zumbaBuilding['name'],
                 'description' => 'Gedung tidak dapat dibooking setiap hari Kamis karena digunakan untuk acara rutin.'
             ]
-        ];
+        ]; 
     }
     
     echo json_encode($events);

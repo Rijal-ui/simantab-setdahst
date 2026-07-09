@@ -13,8 +13,8 @@ $usage_data = $stmt->fetchAll(PDO::FETCH_ASSOC);
 $routine_events = [
     [
         'booking_date' => '2000-01-01', // Use a past date to keep it at the top after sorting (ASC)
-        'start_time' => '07:00:00',
-        'end_time' => '17:00:00',
+        'start_time' => '15:00:00',
+        'end_time' => '18:00:00',
         'building_name' => 'Gedung Balai Rakyat (Siang Hari)',
         'organization' => 'Ketua TP PKK Kabupaten Hulu Sungai Tengah',
         'booker_name' => 'Acara Rutin',

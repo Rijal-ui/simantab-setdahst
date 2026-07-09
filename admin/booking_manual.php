@@ -91,17 +91,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
     $admin_notes = $_POST['admin_notes'];
 
+    // Fetch building info first
+    $bStmt = $pdo->prepare("SELECT * FROM buildings WHERE id = ?");
+    $bStmt->execute([$building_id]);
+    $building = $bStmt->fetch(PDO::FETCH_ASSOC);
+    $rental_type = $building['rental_type'] ?? 'per_hari';
+
+    // Define variables for validation
+    $is_multi_day = isset($_POST['is_multi_day']) && $_POST['is_multi_day'] === '1';
+    $dates = [];
+    $start_time_use = '00:00:00';
+    $end_time_use = '23:59:59';
+
+    // Populate dates and times
+    if ($rental_type === 'per_tahun') {
+        $booking_year = $_POST['booking_year'];
+        $dates[] = $booking_year . '-01-01';
+    } else {
+        if ($is_multi_day) {
+            $period = new DatePeriod(
+                new DateTime($_POST['date_from']),
+                new DateInterval('P1D'),
+                (new DateTime($_POST['date_to']))->modify('+1 day')
+            );
+            foreach ($period as $dt) {
+                $dates[] = $dt->format('Y-m-d');
+            }
+        } else {
+            $dates[] = $_POST['booking_date'];
+            if ($rental_type === 'per_hari') {
+                $start_time_use = $_POST['start_time'];
+                $end_time_use = $_POST['end_time'];
+            }
+        }
+    }
+
     if (!$error) {
         try {
             $pdo->beginTransaction();
 
-            // Fetch building info
-            $bStmt = $pdo->prepare("SELECT * FROM buildings WHERE id = ?");
-            $bStmt->execute([$building_id]);
-            $building = $bStmt->fetch(PDO::FETCH_ASSOC);
-            $rental_type = $building['rental_type'] ?? 'per_hari';
-
-            $dates = [];
+            // Reset and re-populate variables for processing
+            $dates = []; // Reset array to avoid duplicates
             if ($rental_type === 'per_tahun') {
                 $booking_year = $_POST['booking_year'];
                 $dates[] = $booking_year . '-01-01';
@@ -132,25 +162,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
 
-            // Restriction for "Gedung Balai Rakyat (Siang Hari)" on Thursdays (Acara Rutin)
-            if (stripos($building['name'], 'Balai Rakyat') !== false && stripos($building['name'], 'Siang Hari') !== false) {
-                foreach ($dates as $date) {
-                    if (date('N', strtotime($date)) == 4) { // 4 = Thursday
-                        throw new Exception("Mohon maaf, Gedung Balai Rakyat (Siang Hari) tidak dapat dibooking pada hari Kamis karena digunakan untuk Acara Rutin Zumba Isteri Bupati.");
-                    }
-                }
+            // Normalize times to H:i:s format
+            $check_start_time = $start_time_use;
+            $check_end_time = $end_time_use;
+            
+            if (strlen($check_start_time) === 5) { // If format is H:i
+                $check_start_time .= ':00';
+            }
+            if (strlen($check_end_time) === 5) {
+                $check_end_time .= ':00';
             }
 
-            // Time restrictions based on building name
-            if (!$is_atm_building) {
-                if (stripos($building['name'], 'Balai Rakyat') !== false && stripos($building['name'], 'Siang Hari') !== false) {
-                    if ($start_time_use < '07:00:00' || $end_time_use > '17:00:00') {
-                        throw new Exception("Jam booking untuk Gedung Balai Rakyat (Siang Hari) hanya tersedia dari pukul 07:00 WITA s.d 17:00 WITA.");
+            // Time restrictions for Gedung Balai Rakyat (Siang Hari)
+            if (stripos($building['name'], 'Balai Rakyat') !== false && stripos($building['name'], 'Siang Hari') !== false) {
+                foreach ($dates as $date) {
+                    $is_thursday = date('N', strtotime($date)) == 4; // 4 = Thursday
+                    
+                    if ($is_thursday) {
+                        // Hari Kamis: hanya 07:00 - 12:00
+                        if ($rental_type === 'per_hari' && !$is_multi_day) {
+                            // Only check time for single-day bookings
+                            if ($check_start_time < '07:00:00' || $check_end_time > '12:00:00') {
+                                throw new Exception("Pada hari Kamis, Gedung Balai Rakyat (Siang Hari) hanya dapat dibooking dari pukul 07:00 WITA s.d 12:00 WITA.");
+                            }
+                        }
+                    } else {
+                        // Hari lain: 07:00 - 17:00
+                        if ($rental_type === 'per_hari' && !$is_multi_day) {
+                            if ($check_start_time < '07:00:00' || $check_end_time > '17:00:00') {
+                                throw new Exception("Jam booking untuk Gedung Balai Rakyat (Siang Hari) hanya tersedia dari pukul 07:00 WITA s.d 17:00 WITA.");
+                            }
+                        }
                     }
-                } elseif (stripos($building['name'], 'Balai Rakyat') !== false && stripos($building['name'], 'Malam Hari') !== false) {
-                    if (!($start_time_use >= '18:00:00' || $end_time_use <= '06:00:00')) {
-                        throw new Exception("Jam booking untuk Gedung Balai Rakyat (Malam Hari) hanya tersedia dari pukul 18:00 WITA s.d 06:00 WITA.");
-                    }
+                }
+            } elseif (stripos($building['name'], 'Balai Rakyat') !== false && stripos($building['name'], 'Malam Hari') !== false) {
+                // Gedung Balai Rakyat (Malam Hari) tetap sama
+                if (!($check_start_time >= '18:00:00' || $check_end_time <= '06:00:00')) {
+                    throw new Exception("Jam booking untuk Gedung Balai Rakyat (Malam Hari) hanya tersedia dari pukul 18:00 WITA s.d 06:00 WITA.");
                 }
             }
 
@@ -162,7 +210,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         AND booking_date = ? 
                         AND status = 'approved'
                         AND ((start_time <= ? AND end_time >= ?) OR (start_time <= ? AND end_time >= ?))");
-                    $checkStmt->execute([$building_id, $date, $start_time_use, $start_time_use, $end_time_use, $end_time_use]);
+                    $checkStmt->execute([$building_id, $date, $check_start_time, $check_start_time, $check_end_time, $check_end_time]);
                     $count = $checkStmt->fetchColumn();
 
                     if ($count >= $building['quantity']) {
@@ -174,8 +222,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Insert manual bookings (directly approved)
             $primary_booking_id = null;
             foreach ($dates as $idx => $date) {
+                // Ensure time is in H:i:s format
+                $db_start_time = $start_time_use;
+                $db_end_time = $end_time_use;
+                if (strlen($db_start_time) === 5) {
+                    $db_start_time .= ':00';
+                }
+                if (strlen($db_end_time) === 5) {
+                    $db_end_time .= ':00';
+                }
+                
                 $insertStmt = $pdo->prepare("INSERT INTO bookings (building_id, booker_name, booker_phone, organization, event_name, booking_date, start_time, end_time, status, admin_notes, proposal_file) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'approved', ?, ?)");
-                $insertStmt->execute([$building_id, $booker_name, $booker_phone, $organization, $event_name, $date, $start_time_use, $end_time_use, $admin_notes, $proposal_file]);
+                $insertStmt->execute([$building_id, $booker_name, $booker_phone, $organization, $event_name, $date, $db_start_time, $db_end_time, $admin_notes, $proposal_file]);
                 if ($idx === 0) {
                     $primary_booking_id = $pdo->lastInsertId();
                 }
@@ -518,57 +576,66 @@ include 'header.php';
         };
 
         let startTimePicker, endTimePicker, bookingDatePicker, dateFromPicker, dateToPicker;
+        let selectedBuildingName = '';
+
+        // Function to initialize time pickers with specific min/max
+        function initTimePickers(minTime, maxTime, placeholderStart, placeholderEnd) {
+            // Destroy existing pickers
+            if (startTimePicker) startTimePicker.destroy();
+            if (endTimePicker) endTimePicker.destroy();
+            
+            // Create new config
+            let newTimeConfig = { ...timePickerConfig, minTime: minTime, maxTime: maxTime };
+            
+            // Initialize pickers
+            startTimePicker = flatpickr("#start_time", newTimeConfig);
+            endTimePicker = flatpickr("#end_time", newTimeConfig);
+            
+            // Update placeholders
+            const st = document.getElementById('start_time');
+            const et = document.getElementById('end_time');
+            if (st) st.placeholder = placeholderStart;
+            if (et) et.placeholder = placeholderEnd;
+        }
 
         function updatePickers(buildingName) {
+            selectedBuildingName = buildingName;
             if (!buildingName) return;
             
             const name = buildingName.toLowerCase();
-            let currentTimeConfig = { ...timePickerConfig };
             let currentDateConfig = { ...datePickerConfig };
 
-            // Reset restrictions
-            delete currentTimeConfig.minTime;
-            delete currentTimeConfig.maxTime;
-            delete currentDateConfig.disable;
-
             if (name.includes('balai rakyat') && name.includes('siang hari')) {
-                currentTimeConfig.minTime = "07:00";
-                currentTimeConfig.maxTime = "17:00";
-                currentDateConfig.disable = [
-                    function(date) { return (date.getDay() === 4); } // 4 = Thursday
-                ];
-                const st = document.getElementById('start_time');
-                const et = document.getElementById('end_time');
-                if (st) st.placeholder = "07:00";
-                if (et) et.placeholder = "17:00";
+                // Init with default (non-Thursday) times
+                initTimePickers("07:00", "17:00", "07:00", "17:00");
+                
+                // Add date change listener to update time restrictions
+                currentDateConfig.onChange = function(selectedDates) {
+                    if (selectedDates.length > 0) {
+                        const date = selectedDates[0];
+                        const isThursday = date.getDay() === 4; // 4 = Thursday
+                        
+                        if (isThursday) {
+                            initTimePickers("07:00", "12:00", "07:00", "12:00");
+                        } else {
+                            initTimePickers("07:00", "17:00", "07:00", "17:00");
+                        }
+                    }
+                };
             } else if (name.includes('balai rakyat') && name.includes('malam hari')) {
-                currentTimeConfig.minTime = "18:00";
-                currentTimeConfig.maxTime = "06:00";
-                const st = document.getElementById('start_time');
-                const et = document.getElementById('end_time');
-                if (st) st.placeholder = "18:00";
-                if (et) et.placeholder = "06:00";
+                initTimePickers("18:00", "06:00", "18:00", "06:00");
             } else {
-                const st = document.getElementById('start_time');
-                const et = document.getElementById('end_time');
-                if (st) st.placeholder = "--:--";
-                if (et) et.placeholder = "--:--";
+                initTimePickers(null, null, "--:--", "--:--");
             }
 
-            // Re-init pickers
-            if (startTimePicker) startTimePicker.destroy();
-            if (endTimePicker) endTimePicker.destroy();
+            // Re-init date pickers
             if (bookingDatePicker) bookingDatePicker.destroy();
             if (dateFromPicker) dateFromPicker.destroy();
             if (dateToPicker) dateToPicker.destroy();
-
-            if (document.getElementById('start_time')) {
-                startTimePicker = flatpickr("#start_time", currentTimeConfig);
-                endTimePicker = flatpickr("#end_time", currentTimeConfig);
-                bookingDatePicker = flatpickr('input[name="booking_date"]', currentDateConfig);
-                dateFromPicker = flatpickr('input[name="date_from"]', currentDateConfig);
-                dateToPicker = flatpickr('input[name="date_to"]', currentDateConfig);
-            }
+            
+            bookingDatePicker = flatpickr('input[name="booking_date"]', currentDateConfig);
+            dateFromPicker = flatpickr('input[name="date_from"]', currentDateConfig);
+            dateToPicker = flatpickr('input[name="date_to"]', currentDateConfig);
         }
 
         const calendarTitleText = document.getElementById('calendar-title-text');
