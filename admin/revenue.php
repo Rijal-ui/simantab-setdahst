@@ -9,20 +9,44 @@ if (!in_array($current_role, ['super_admin', 'admin', 'user_khusus'])) {
     exit;
 }
 
-$year = $_GET['year'] ?? date('Y');
-$month = $_GET['month'] ?? ''; // Empty means all year
+// Helper function to format date in Indonesian
+function formatDateIndonesian($dateString) {
+    if (!$dateString) return '';
+    
+    $months = [
+        1 => 'Januari',
+        2 => 'Februari',
+        3 => 'Maret',
+        4 => 'April',
+        5 => 'Mei',
+        6 => 'Juni',
+        7 => 'Juli',
+        8 => 'Agustus',
+        9 => 'September',
+        10 => 'Oktober',
+        11 => 'November',
+        12 => 'Desember'
+    ];
+    
+    $timestamp = strtotime($dateString);
+    $day = date('j', $timestamp);
+    $month = date('n', $timestamp);
+    $year = date('Y', $timestamp);
+    
+    return $day . ' ' . $months[$month] . ' ' . $year;
+}
 
-$months = [
-    1 => 'Januari', 2 => 'Februari', 3 => 'Maret', 4 => 'April',
-    5 => 'Mei', 6 => 'Juni', 7 => 'Juli', 8 => 'Agustus',
-    9 => 'September', 10 => 'Oktober', 11 => 'November', 12 => 'Desember'
-];
-
-// Generate years for dropdown
-$years = range(date('Y'), date('Y') - 5);
+// Get date range from GET parameters
+$date_from = $_GET['date_from'] ?? null;
+$date_to = $_GET['date_to'] ?? null;
 
 include 'header.php';
 ?>
+
+<!-- Flatpickr CSS & JS -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/id.js"></script>
 
 <style>
     .xsmall { font-size: 0.7rem; }
@@ -111,7 +135,7 @@ include 'header.php';
 <div class="print-header text-center">
     <h2 class="fw-bold mb-1">LAPORAN PENDAPATAN</h2>
    <!-- <h4 class="mb-2">SI MANTAB BMD - SETDA HST</h4> -->
-    <p class="mb-0 text-muted">Periode: <?= $month ? ($months[$month] ?? '') . ' ' . $year : 'Tahun ' . $year ?></p>
+    <p class="mb-0 text-muted">Periode: <?= ($date_from && $date_to) ? formatDateIndonesian($date_from) . ' s.d ' . formatDateIndonesian($date_to) : 'Semua Data' ?></p>
     <hr class="my-4">
 </div>
 
@@ -126,25 +150,16 @@ include 'header.php';
 
 <div class="card border-0 shadow-sm mb-4">
     <div class="card-body p-4">
-        <form method="GET" class="row g-3 align-items-end">
+        <form method="GET" class="row g-3 align-items-end" id="filterForm">
             <div class="col-md-4">
-                <label class="form-label small fw-bold text-muted text-uppercase">Tahun</label>
-                <select name="year" class="form-select border-0 bg-light shadow-none">
-                    <?php foreach($years as $y): ?>
-                        <option value="<?= $y ?>" <?= $year == $y ? 'selected' : '' ?>><?= $y ?></option>
-                    <?php endforeach; ?>
-                </select>
+                <label class="form-label small fw-bold text-muted text-uppercase">Dari</label>
+                <input type="text" id="date_from_display" value="<?= $date_from ? date('d/m/Y', strtotime($date_from)) : '' ?>" class="form-control border-0 bg-light shadow-none">
+                <input type="hidden" name="date_from" id="date_from" value="<?= $date_from ?>">
             </div>
             <div class="col-md-4">
-                <label class="form-label small fw-bold text-muted text-uppercase">Bulan</label>
-                <select name="month" class="form-select border-0 bg-light shadow-none">
-                    <option value="">Semua Bulan</option>
-                    <?php
-                    foreach($months as $num => $name):
-                    ?>
-                        <option value="<?= $num ?>" <?= $month == $num ? 'selected' : '' ?>><?= $name ?></option>
-                    <?php endforeach; ?>
-                </select>
+                <label class="form-label small fw-bold text-muted text-uppercase">Sampai</label>
+                <input type="text" id="date_to_display" value="<?= $date_to ? date('d/m/Y', strtotime($date_to)) : '' ?>" class="form-control border-0 bg-light shadow-none">
+                <input type="hidden" name="date_to" id="date_to" value="<?= $date_to ?>">
             </div>
             <div class="col-md-4">
                 <button type="submit" class="btn btn-primary w-100 shadow-sm">
@@ -167,13 +182,14 @@ $query = "
     FROM invoices i
     JOIN bookings b ON i.booking_id = b.id
     JOIN buildings bu ON b.building_id = bu.id
-    WHERE i.status = 'paid' AND YEAR(i.updated_at) = ?
+    WHERE i.status = 'paid'
 ";
-$params = [$year];
+$params = [];
 
-if ($month) {
-    $query .= " AND MONTH(i.updated_at) = ?";
-    $params[] = $month;
+if ($date_from && $date_to) {
+    $query .= " AND DATE(i.updated_at) BETWEEN ? AND ?";
+    $params[] = $date_from;
+    $params[] = $date_to;
 }
 
 $query .= " ORDER BY i.updated_at DESC";
@@ -209,7 +225,7 @@ foreach ($invoices as $inv) {
                     </div>
                 </div>
                 <h2 class="fw-bold mb-0">Rp <?= number_format($total_revenue, 0, ',', '.') ?></h2>
-                <div class="text-muted small mt-2">Periode: <?= $month ? $months[$month] . ' ' . $year : 'Tahun ' . $year ?></div>
+                <div class="text-muted small mt-2">Periode: <?= ($date_from && $date_to) ? formatDateIndonesian($date_from) . ' s.d ' . formatDateIndonesian($date_to) : 'Semua Data' ?></div>
             </div>
         </div>
     </div>
@@ -315,4 +331,39 @@ foreach ($invoices as $inv) {
     </div>
 </div>
 
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize Flatpickr for "Dari"
+    flatpickr("#date_from_display", {
+        locale: "id",
+        dateFormat: "d/m/Y",
+        altInput: false,
+        onChange: function(selectedDates, dateStr, instance) {
+            if (selectedDates[0]) {
+                // Convert to YYYY-MM-DD for hidden input
+                const year = selectedDates[0].getFullYear();
+                const month = String(selectedDates[0].getMonth() + 1).padStart(2, '0');
+                const day = String(selectedDates[0].getDate()).padStart(2, '0');
+                document.getElementById('date_from').value = `${year}-${month}-${day}`;
+            }
+        }
+    });
+
+    // Initialize Flatpickr for "Sampai"
+    flatpickr("#date_to_display", {
+        locale: "id",
+        dateFormat: "d/m/Y",
+        altInput: false,
+        onChange: function(selectedDates, dateStr, instance) {
+            if (selectedDates[0]) {
+                // Convert to YYYY-MM-DD for hidden input
+                const year = selectedDates[0].getFullYear();
+                const month = String(selectedDates[0].getMonth() + 1).padStart(2, '0');
+                const day = String(selectedDates[0].getDate()).padStart(2, '0');
+                document.getElementById('date_to').value = `${year}-${month}-${day}`;
+            }
+        }
+    });
+});
+</script>
 <?php include '../footer.php'; ?>

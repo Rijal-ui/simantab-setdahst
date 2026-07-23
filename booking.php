@@ -284,11 +284,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $invoiceStmt = $pdo->prepare("INSERT INTO invoices (id, booking_id, amount) VALUES (?, ?, ?)");
                 $invoiceStmt->execute([$invoice_id, $primary_booking_id, $final_amount]);
                 
-                $message = "Booking untuk $number_of_days hari berhasil diajukan! Total tagihan telah dibuat. <a href='invoice.php?id=$invoice_id' target='_blank' class='fw-bold text-decoration-underline'>Lihat Invoice</a>";
+                // 🔥 PERBAIKAN: Memindahkan tombol SKM agar berada tepat di bawah kalimat penjelasnya
+                $message = "<div class='text-center w-100'>" .
+                        "  <span class='d-block mb-2'><i class='bi bi-check-circle-fill text-success me-1'></i> <strong>Berhasil!</strong> Booking untuk $number_of_days hari telah diajukan dan tagihan sukses dibuat.</span>" . 
+                        "  <div class='d-flex justify-content-center align-items-center my-3'>" .
+                        "    <a href='invoice.php?id=$invoice_id' target='_blank' class='btn btn-sm btn-primary fw-bold px-3 py-2'><i class='bi bi-file-earmark-text me-1'></i> Lihat Invoice</a>" .
+                        "  </div>" .
+                        "  <div class='border-top my-3 pt-3'>" .
+                        "    <small class='text-muted d-block mb-2'>💡 Mohon luangkan waktu sejenak untuk mengisi Survei Kepuasan Masyarakat (SKM) Bagian Umum Sekretariat Daerah Peminjaman Ruang Rapat/Aula/Gedung Pertemuan - Peminjaman Ruang Rapat/Aula/Gedung</small>" .
+                        "    <div class='d-flex justify-content-center align-items-center mt-2'>" .
+                        "      <a href='https://skm.go.id/isi-survey/884fe907-9d61-42c7-8691-de35893808af/bd2f24f5-40ae-4bfa-b0b3-ac3c6de1fdc2' target='_blank' class='btn btn-sm btn-danger fw-bold px-3 py-2'><i class='bi bi-pencil-square me-1'></i> Isi Survei SKM</a>" .
+                        "    </div>" .
+                        "  </div>" .
+                        "</div>";
             } else {
-                $message = $is_multi_day 
-                    ? "Booking untuk $number_of_days hari berhasil diajukan! Menunggu persetujuan admin."
-                    : "Booking berhasil diajukan! Menunggu persetujuan admin.";
+                // 🔥 PERBAIKAN: Berlaku juga untuk alur gedung gratis
+                $msg_day = $is_multi_day ? "Booking untuk $number_of_days hari" : "Booking";
+                $message = "<div class='text-center w-100'>" .
+                        "  <span class='d-block mb-2'><i class='bi bi-check-circle-fill text-success me-1'></i> <strong>Berhasil!</strong> $msg_day sukses diajukan dan menunggu persetujuan admin.</span>" .
+                        "  <div class='border-top my-3 pt-3'>" .
+                        "    <small class='text-muted d-block mb-2'>💡 Mohon luangkan waktu sejenak untuk mengisi Survei Kepuasan Masyarakat (SKM) di bawah demi meningkatkan kualitas pelayanan kami.</small>" .
+                        "    <div class='d-flex justify-content-center align-items-center mt-2'>" .
+                        "      <a href='https://skm.go.id/isi-survey/884fe907-9d61-42c7-8691-de35893808af/bd2f24f5-40ae-4bfa-b0b3-ac3c6de1fdc2' target='_blank' class='btn btn-sm btn-danger fw-bold px-3 py-2'><i class='bi bi-pencil-square me-1'></i> Isi Survei SKM</a>" .
+                        "    </div>" .
+                        "  </div>" .
+                        "</div>";
             }
 
             $pdo->commit();
