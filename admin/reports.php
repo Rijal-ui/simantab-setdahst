@@ -260,6 +260,7 @@ $query = "
     SELECT b.*, g.name as building_name 
     FROM bookings b 
     JOIN buildings g ON b.building_id = g.id
+    WHERE b.status = 'approved'
 ";
 $params = [];
 
