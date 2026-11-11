@@ -265,7 +265,7 @@ $query = "
 $params = [];
 
 if ($date_from && $date_to) {
-    $query .= " WHERE DATE(b.booking_date) BETWEEN ? AND ?";
+    $query .= " AND DATE(b.booking_date) BETWEEN ? AND ?";
     $params[] = $date_from;
     $params[] = $date_to;
 }
